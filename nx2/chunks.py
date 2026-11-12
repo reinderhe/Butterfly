@@ -300,5 +300,7 @@ def edit_c(gen, stats, supported, whole=True):
     supported build's whole standalone lift fails when an output-size edit finds no place), then, last, the page marks of each
     group of stores shared (a64_lift.group_marks), which changes that text. stats: the lift's, for its report"""
     import oot_patches
-    oot_patches.apply(gen, protect_hearts=supported, required=supported and whole)
+    import game
+    if game.is_oot():   # (Ocarina of Time's patches and output-size edits: only its code has their places)
+        oot_patches.apply(gen, protect_hearts=supported, required=supported and whole)
     a64_lift.group_marks(sorted(glob.glob(os.path.join(glob.escape(gen), "code_*.c"))), stats)
