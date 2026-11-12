@@ -354,11 +354,15 @@ HLE(_ZN2nn2fs15MountSystemDataEPKcNS_3ncm12SystemDataIdEPvm) {
 }
 /* GetRamDiskBufferSize(unsigned long size) -> the buffer MountRamDisk needs: ours lives on disk, so a token page */
 HLE(_ZN2nn2fs20GetRamDiskBufferSizeEm) { RET(0x1000); }
-/* MountRamDisk(char const*, void*, unsigned long): a folder under the user folder */
+static void delete_tree(const char *dir);
+/* MountRamDisk(char const*, void*, unsigned long): a folder under the user folder, emptied as it is mounted (a RAM
+   disk starts empty: Sports Resort's second run aborted making a file the first run had left there) */
 HLE(_ZN2nn2fs12MountRamDiskEPKcPvm) {
-    char sub[64];
+    char sub[64], root[HOS_FS_PATH];
     snprintf(sub, sizeof sub, "ramdisk\\%s", gstr(ARG(0)));
-    for (char *p = sub; *p; p++) if (*p == ':' || *p == '/') *p = '_';
+    for (char *p = sub + 8; *p; p++) if (*p == ':' || *p == '/' || *p == '\\' || *p == '.') *p = '_';
+    snprintf(root, sizeof root, "%s\\%s", hos_user_dir, sub);
+    if (GetFileAttributesA(root) != INVALID_FILE_ATTRIBUTES) delete_tree(root);
     RET(user_mount(gstr(ARG(0)), sub) ? 0 : R_NOT_MOUNTED);
 }
 /* MountDeviceSaveData(char const*): the console's save, shared by its users */
