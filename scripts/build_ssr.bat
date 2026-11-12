@@ -4,7 +4,7 @@ rem Builds Butterfly (Nintendo Switch Sports Resort) into E:\Butterfly with Hook
 rem Run Hookshot Builder once first, so its tools are installed. Then put this file anywhere and run it.
 
 rem ---- your settings -------------------------------------------------------------------------------------
-set "NUP=E:\Switch 2 roms\Switch Sports Resort.nup"
+set "NUP=E:\Switch 2 roms\NintendoSwitchSportsResort_v1.1.0.nup"
 set "BASE=E:\Butterfly"
 set "BRANCH=ssr"
 rem ----------------------------------------------------------------------------------------------------------
