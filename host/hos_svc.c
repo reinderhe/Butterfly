@@ -500,10 +500,22 @@ void a64_svc(Ctx *c, uint32_t imm) {
         uint32_t cmd = 0;
         for (int off = 8; off < 0x40; off += 4)
             if (*(uint32_t *)(tls + off) == 0x49434653u) { cmd = *(uint32_t *)(tls + off + 8); break; }
+        /* (butterfly) a TIPC request (type 16 + command; sm: on SDK 20+): name the command, and for sm's GetService
+           (TIPC 1, the service's 8-byte name as its data) the service asked for */
+        char what[48] = "";
+        if ((w0 & 0xffff) >= 16) {
+            cmd = (w0 & 0xffff) - 16;
+            if (cmd == 1 && (w1 & 0x3ff) == 2) {
+                char name[9] = {0};
+                memcpy(name, tls + 8, 8);
+                for (int i = 0; i < 8; i++) if (name[i] && (name[i] < 32 || name[i] > 126)) name[i] = '?';
+                snprintf(what, sizeof what, ", GetService(\"%s\")", name);
+            }
+        }
         static volatile LONG logged;
         if (InterlockedIncrement(&logged) <= 64)
-            hos_log("ipc: handle %#x command %u (hipc %08x %08x, lr %#llx): answered empty", (uint32_t)c->x[0], cmd,
-                    w0, w1, (unsigned long long)c->x[30]);
+            hos_log("ipc: handle %#x command %u%s (hipc %08x %08x, lr %#llx): answered empty", (uint32_t)c->x[0], cmd,
+                    what, w0, w1, (unsigned long long)c->x[30]);
         memset(tls, 0, 0x100);
         *(uint32_t *)(tls + 0) = 0;                 /* HIPC: type 0, no descriptors */
         *(uint32_t *)(tls + 4) = 16;                /* 16 raw data words, no handle descriptor */
