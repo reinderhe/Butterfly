@@ -12,3 +12,5 @@ copy can be refreshed from upstream by copying the files again.
 
 Licensing: `lift/suyu/arm64_to_c.h` is suyu's (GPL-2.0-or-later, texts in `lift/suyu/`), so `a64emit.dll`, the
 generated runtime and all lifted C are GPL. See `NOTICE.TOTKPort.md`.
+
+(butterfly) `hos/nx_image.py` handles R_AARCH64_TLSDESC (type 1031): Switch Sports Resort's TensorRT module has one.
