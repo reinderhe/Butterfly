@@ -324,7 +324,7 @@ class NupCacheTests(unittest.TestCase):
             self.run_to_lift(self.new_nup, supported=False)
         self.assertEqual(self.extractions, [self.new_nup])
         self.assertEqual(result.exception.code, 1)
-        self.assertIn("This is build 01234567. Hookshot supports build %s." % make_game.BUILD_ID, self.output)
+        self.assertIn("This is build 01234567. Supported builds: %s." % make_game._game.supported_builds(), self.output)
         self.assertEqual(self.cache(), before)
         self.assertFalse((self.out / ".game").exists())
 

@@ -501,9 +501,13 @@ def _edit_marks(path):
     """(edit_c, one file, in a process of its own) the output-size edits, then the page marks of each group of stores
     (a64_lift.mark_groups, which changes the text they match)"""
     import oot_patches
+    import game
     with open(path, encoding="utf-8", newline="") as f:
         s = f.read()
-    out, found, lines = oot_patches.output_size_file(s, os.path.basename(path))
+    if game.is_oot():
+        out, found, lines = oot_patches.output_size_file(s, os.path.basename(path))
+    else:   # (Ocarina of Time's output-size edits: not this game's code)
+        out, found, lines = s, [0] * len(oot_patches.OUT_EDITS), []
     st = collections.Counter()
     if not os.environ.get("A64_MARK_EACH"):   # (a64_lift.group_marks' switch: no groups)
         out = a64_lift.mark_groups(out, st)
@@ -596,15 +600,18 @@ def edit_c(gen, stats, supported, whole=True, took=None, jobs=None):
     divides both or neither), the output size and the groups. Five passes over the 1.5 GB of C on one core took a minute. The
     files and the lines printed are the one-process ones, byte for byte (tests/test_mark_groups.py)"""
     import oot_patches
+    import game
     took = took or (lambda what: None)
     jobs = file_jobs() if jobs is None else jobs
     paths = sorted(glob.glob(os.path.join(glob.escape(gen), "code_*.c")))
-    done = _each(_edit_patches, [(p, supported) for p in paths], jobs)
-    for _, lines in done:
-        if lines:
-            print("\n".join(lines))
-    oot_patches.report(paths, [counts for counts, _ in done], supported)
-    took("patches (%d processes)" % jobs)
+    oot = game.is_oot()
+    if oot:   # (Ocarina of Time's patches: only its code has their places)
+        done = _each(_edit_patches, [(p, supported) for p in paths], jobs)
+        for _, lines in done:
+            if lines:
+                print("\n".join(lines))
+        oot_patches.report(paths, [counts for counts, _ in done], supported)
+        took("patches (%d processes)" % jobs)
     found = [0] * len(oot_patches.OUT_EDITS)
     for here, lines, st in _each(_edit_marks, paths, jobs):
         found = [a + b for a, b in zip(found, here)]
@@ -612,5 +619,6 @@ def edit_c(gen, stats, supported, whole=True, took=None, jobs=None):
             print("\n".join(lines))
         for k, v in st.items():
             stats[k] = stats.get(k, 0) + v
-    oot_patches.check_output_size(found, required=supported and whole)
+    if oot:
+        oot_patches.check_output_size(found, required=supported and whole)
     took("output size and page-mark groups")
