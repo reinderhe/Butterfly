@@ -12,6 +12,7 @@ rem ----------------------------------------------------------------------------
 set "TOOLS=%BASE%\tools"
 set "GAME=%BASE%\game"
 set "LOG=%BASE%\build.log"
+set "WORK=%BASE%\work"
 
 if not exist "%NUP%" (
     echo Can't find your game file: %NUP%
@@ -49,10 +50,14 @@ set "WGPU_NATIVE=%TOOLS%\wgpu-native"
 if exist "%TOOLS%\emsdk" set "EMSDK=%TOOLS%\emsdk"
 set "PYTHONIOENCODING=utf-8"
 set "HOOKSHOT_GAME=ssr"
+rem (temporary files on E: too)
+set "TEMP=%BASE%\temp"
+set "TMP=%BASE%\temp"
+if not exist "%BASE%\temp" mkdir "%BASE%\temp"
 cd /d "%TOOLS%"
 echo.
 echo Building. This takes 20 to 60 minutes; the PC stays usable. The log: %LOG%
-"%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --log "%LOG%"
+"%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --work "%WORK%" --log "%LOG%"
 if errorlevel 1 (
     echo.
     echo The build stopped. Send Claude the end of %LOG%.
