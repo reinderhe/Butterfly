@@ -57,7 +57,8 @@ if not exist "%BASE%\temp" mkdir "%BASE%\temp"
 cd /d "%TOOLS%"
 echo.
 echo Building. This takes 20 to 60 minutes; the PC stays usable. The log: %LOG%
-"%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --work "%WORK%" --log "%LOG%"
+rem (below normal priority, as Hookshot Builder runs it, so the PC stays responsive; HOOKSHOT_JOBS=<n> limits the compilers)
+start "" /belownormal /wait /b "%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --work "%WORK%" --log "%LOG%"
 if errorlevel 1 (
     echo.
     echo The build stopped. Send Claude the end of %LOG%.
