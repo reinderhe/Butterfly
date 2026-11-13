@@ -347,7 +347,56 @@ static void setup_guest(HosThread *t) {
     c->thread = t;
 }
 
+/* (butterfly) F11 in the game: every guest thread's guest frame chain into the log, from its registers as it last
+   called into the runtime (a thread waiting on something shows where it waits; one running guest code shows where it
+   last made a call). For a game that stops without crashing. HOS_THREADS_EVERY=<s>: also every s seconds. */
+static uint64_t thread_peek(uint64_t a) {
+    if (!hos_guest_range(a, 8)) return 0;
+    return *(const uint64_t *)GP(a);
+}
+void hos_dump_threads(const char *why) {
+    AcquireSRWLockShared(&threads_lock);
+    hos_log("threads (%s): %d", why, nthreads);
+    for (int i = 0; i < nthreads; i++) {
+        HosThread *t = threads[i];
+        const Ctx *c = t->run_ctx ? t->run_ctx : &t->ctx;
+        char bt[768];
+        int n = snprintf(bt, sizeof bt, "  %-28s pc %#llx lr %#llx:", t->name, (unsigned long long)c->pc,
+                         (unsigned long long)c->x[30]);
+        uint64_t fp = c->x[29];
+        for (int k = 0; k < 24 && fp && !(fp & 15) && n < (int)sizeof bt - 24; k++) {
+            const uint64_t lr = thread_peek(fp + 8), next = thread_peek(fp);
+            n += snprintf(bt + n, sizeof bt - n, " %#llx", (unsigned long long)lr);
+            if (next <= fp) break;
+            fp = next;
+        }
+        hos_log("%s", bt);
+    }
+    ReleaseSRWLockShared(&threads_lock);
+    hos_log_flush();
+}
+static DWORD WINAPI threads_watch(void *p) {
+    (void)p;
+    const char *e = getenv("HOS_THREADS_EVERY");
+    const int every_ms = e ? atoi(e) * 1000 : 0;
+    int since = 0;
+#ifdef _WIN32
+    int was_down = 0;
+#endif
+    for (;;) {
+        Sleep(100);
+#ifdef _WIN32
+        const int down = (GetAsyncKeyState(VK_F11) & 0x8000) != 0;
+        if (down && !was_down) hos_dump_threads("F11");
+        was_down = down;
+#endif
+        if (every_ms > 0 && (since += 100) >= every_ms) { since = 0; hos_dump_threads("HOS_THREADS_EVERY"); }
+    }
+    return 0;
+}
 static void track(HosThread *t) {
+    static volatile LONG watching;
+    if (!InterlockedExchange(&watching, 1)) CreateThread(NULL, 0, threads_watch, NULL, 0, NULL);
     AcquireSRWLockExclusive(&threads_lock);
     if (nthreads < 1024) threads[nthreads++] = t;
     ReleaseSRWLockExclusive(&threads_lock);
