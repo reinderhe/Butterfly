@@ -130,9 +130,9 @@ static BOOL CALLBACK accept_authentication(LPVOID ctx, PBLUETOOTH_AUTHENTICATION
 /* A Joy-Con Windows already knows, seen by an inquiry and not connected: in pairing mode again (paired with a Switch since,
    say), or only on its way back, which a bonded Joy-Con is for some seconds after it wakes. Removing the pairing of one on its
    way back lost it: the right Joy-Con was removed as the game started, wasn't in pairing mode, and Windows had forgotten it.
-   So its pairing is redone only once it has answered three inquiries in a row (some 15 s) without connecting: one in pairing
+   So its pairing is redone only once it has answered two inquiries in a row (some 8 s) without connecting: one in pairing
    mode stays so, one on its way back has connected by then. */
-#define REPAIR_AFTER 3
+#define REPAIR_AFTER 2
 static struct { BLUETOOTH_ADDRESS addr; int seen; } known[8];
 static int known_seen(const BLUETOOTH_ADDRESS *a) {
     int free_slot = -1;
@@ -166,11 +166,22 @@ static void pair(HANDLE radio, BLUETOOTH_DEVICE_INFO *info) {
         const DWORD removed = bt.RemoveDevice(&info->Address);
         hos_log("hid: pairing: \"%s\": its old pairing removed (result %lu)", name, (unsigned long)removed);
         info->fRemembered = FALSE, info->fAuthenticated = FALSE;
+        /* (Windows takes a moment to forget it: paired at once, the right Joy-Con's pairing timed out (258) twice, while the left
+           one, paired after that wait, came every time) */
+        Sleep(2000);
     }
-    HBLUETOOTH_AUTHENTICATION_REGISTRATION reg = NULL;
-    bt.RegisterForAuthenticationEx(info, &reg, accept_authentication, NULL);
-    const DWORD auth = bt.AuthenticateDeviceEx(NULL, radio, info, NULL, MITMProtectionNotRequiredBonding);
-    if (reg) bt.UnregisterAuthentication(reg);
+    DWORD auth = ERROR_SUCCESS;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (attempt) {
+            hos_log("hid: pairing: \"%s\" didn't answer (result %lu): once more", name, (unsigned long)auth);
+            Sleep(1500);
+        }
+        HBLUETOOTH_AUTHENTICATION_REGISTRATION reg = NULL;
+        bt.RegisterForAuthenticationEx(info, &reg, accept_authentication, NULL);
+        auth = bt.AuthenticateDeviceEx(NULL, radio, info, NULL, MITMProtectionNotRequiredBonding);
+        if (reg) bt.UnregisterAuthentication(reg);
+        if (auth == ERROR_SUCCESS) break;
+    }
     if (auth != ERROR_SUCCESS) {
         bt.RemoveDevice(&info->Address);   /* (not in pairing mode after all: no half-made pairing left) */
         hos_log("hid: pairing: \"%s\" didn't pair (result %lu)", name, (unsigned long)auth);
