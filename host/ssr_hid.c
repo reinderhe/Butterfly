@@ -258,7 +258,8 @@ static void q_from_accel(const float *a, float flat, float q[4]) {
     q_norm(q);
 }
 /* The fusion's Joy-Con axes against the six-axis state's (which Ocarina of Time and the game's own pre-calibration aim read
-   right): each axis kept or turned around. The default (6) turns z around: with the six-axis state's axes the calibrated aim had
+   right): each axis kept or turned around. The default turns all three around (7, with the orientation handed out the other way round, below: the turns of none
+   turned, 1, with gravity read as the calibration accepts it); 6 turns z around: with the six-axis state's axes the calibrated aim had
    pitch and yaw backwards and the calibration's gravity check failed; with x and z turned around (0) all was right but the
    roll (the plane's bank), mirrored. F7 in the game tries the next of the eight (logged), BUTTERFLY_MOTION_AXES=0..7 starts at one. An axis turned
    around turns the acceleration's part on it; the angular velocity, an axial vector, turns with det(T) T. */
@@ -266,11 +267,31 @@ static const signed char axes_sign[8][3] = {{-1, 1, -1}, {1, 1, 1}, {1, -1, 1}, 
                                              {1, -1, -1}, {-1, 1, 1}, {1, 1, -1}, {-1, -1, -1}};
 static volatile int axes_pick = -1;
 static int64_t integ_n = -1;   /* the newest reading integrated (its own count) */
+/* The orientation handed out the other way round (world to Joy-Con, the conjugate): with all axes turned around (variant
+   7) that gives the game its pitch, pointing and bank all the right way (with z turned around (6) the plane was right
+   but table tennis's pointing mirrored; with x and z (0), the bank). F8 turns it off and on, BUTTERFLY_MOTION_CONJ=0
+   starts off. */
+static volatile int conj_out = -1;
+static int motion_conj(void) {
+    static SHORT was;
+    if (conj_out < 0) {
+        const char *e = getenv("BUTTERFLY_MOTION_CONJ");
+        conj_out = !(e && *e == '0');
+        hos_log("hid: sensor fusion orientation handed out %s (F8 turns it around)", conj_out ? "world to Joy-Con" : "Joy-Con to world");
+    }
+    const SHORT now = GetAsyncKeyState(VK_F8) & 0x8000 ? 1 : 0;
+    if (now && !was) {
+        conj_out = !conj_out;
+        hos_log("hid: sensor fusion orientation handed out %s (F8 turns it around)", conj_out ? "world to Joy-Con" : "Joy-Con to world");
+    }
+    was = now;
+    return conj_out;
+}
 static int motion_axes(void) {
     static SHORT was;
     if (axes_pick < 0) {
         const char *e = getenv("BUTTERFLY_MOTION_AXES");
-        axes_pick = e && *e >= '0' && *e <= '7' ? *e - '0' : 6;
+        axes_pick = e && *e >= '0' && *e <= '7' ? *e - '0' : 7;
         hos_log("hid: sensor fusion axes: variant %d (x %+d, y %+d, z %+d; F7 tries the next)", axes_pick,
                 axes_sign[axes_pick][0], axes_sign[axes_pick][1], axes_sign[axes_pick][2]);
     }
@@ -388,7 +409,7 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
     static SRWLOCK out_lock = SRWLOCK_INIT;
     const int integ = use_integration() && live;
     AcquireSRWLockExclusive(&out_lock);
-    const int axv = motion_axes();
+    const int axv = motion_axes(), cj = motion_conj();
     if (integ) integrated(h, live, axv, qs);
     for (int i = 0; i < n; i++) {
         const uint64_t e = out + (uint64_t)i * ENTRY;
@@ -398,6 +419,7 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
             AcquireSRWLockShared(&fusion_lock);
             quat_mul(yaw_fix, qs[i], q);
             ReleaseSRWLockShared(&fusion_lock);
+            if (cj) q[0] = -q[0], q[1] = -q[1], q[2] = -q[2];
         } else {
             fused(m, q);
         }
