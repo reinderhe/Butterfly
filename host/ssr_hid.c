@@ -63,10 +63,19 @@ HLE(_ZN2nn3hid23MergeSingleJoyAsDualJoyERKjS2_) { RET(0); }
 /* IsSixAxisSensorAtRest(handle) -> bool: the motion pad lying still (pad_sdl.c's filter). Switch Sports' calibration
    asks for the Joy-Con laid on a table and waits for this */
 HLE(_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE) {
-    int hos_sdl_motion_still(void);
-    const int still = hos_sdl_motion_still();
+    int hos_sdl_motion_still(float stats[3]);
+    float st[3];
+    const int still = hos_sdl_motion_still(st);
     static int was = -1;
-    if (still != was) was = still, hos_log("hid: the Joy-Con is %s", still ? "at rest" : "moving");
+    static ULONGLONG said;
+    const ULONGLONG now = GetTickCount64();
+    const uint32_t handle = hos_guest_range(ARG(0), 4) ? G32(ARG(0)) : 0;
+    /* (the change, and every 2 s while it is asked: the sensors' noise, to set HOS_MOTION_REST_* from a real Joy-Con) */
+    if (still != was || now - said >= 2000) {
+        hos_log("hid: at rest? %s (handle %#x; gyro spread %.4f rad/s, accel spread %.4f G, |accel| %.3f G)",
+                still ? "yes" : "no", handle, st[0], st[1], st[2]);
+        was = still, said = now;
+    }
     RET(still);
 }
 /* GetGyroscopeZeroDriftMode(handle) -> GyroscopeZeroDriftMode: 1 standard (what the motion filter does) */

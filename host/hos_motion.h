@@ -53,6 +53,7 @@ typedef struct {
     float bias[3];        /* turns a second, the Switch's frame */
     float learned_t;      /* seconds of stillness learned from (fast at first, then slowly) */
     float still_t;        /* seconds still */
+    float rest_t;         /* (butterfly) seconds at rest by the looser test IsSixAxisSensorAtRest answers with */
     float gmean[3], gvar, avec[3], avar, amean;   /* the short window's means and variances (stillness) */
     int stats_ready, only_accelerometer, reset_counter;
     float last_accel[3], last_gyro[3], pending_dt;
@@ -65,6 +66,11 @@ typedef struct {
 #define HOS_MOTION_STILL_GYRO 0.015f    /* rad/s, summed over three axes (about 0.009 on each) */
 #define HOS_MOTION_STILL_ACCEL 0.0173f  /* G, the same way (0.01 on each) */
 #define HOS_MOTION_STILL_S 0.5f
+/* (butterfly) at rest as the game asks it (a Joy-Con laid on a table for calibration): looser than the bias learner's
+   stillness above, which a real Joy-Con's sensor noise can keep breaking */
+#define HOS_MOTION_REST_GYRO 0.06f      /* rad/s, summed over three axes (about 2 degrees a second on each) */
+#define HOS_MOTION_REST_ACCEL 0.04f     /* G */
+#define HOS_MOTION_REST_S 0.3f
 #define HOS_MOTION_WINDOW_S 0.2f
 #define HOS_MOTION_DT_MAX 0.1f          /* (Eden ignores a longer gap) */
 #define HOS_MOTION_THRESHOLD 0.007f     /* turns a second: less is none (the console's standard zero-drift mode) */
@@ -183,6 +189,9 @@ static inline int hos_motion_update(HosMotion *m, const float accel_sdl[3], cons
     const int still = m->gvar < HOS_MOTION_STILL_GYRO * HOS_MOTION_STILL_GYRO &&
                       m->avar < HOS_MOTION_STILL_ACCEL * HOS_MOTION_STILL_ACCEL && m->amean > 0.9f && m->amean < 1.1f;
     m->still_t = still ? m->still_t + dt : 0;
+    const int rest = m->gvar < HOS_MOTION_REST_GYRO * HOS_MOTION_REST_GYRO &&
+                     m->avar < HOS_MOTION_REST_ACCEL * HOS_MOTION_REST_ACCEL && m->amean > 0.85f && m->amean < 1.15f;
+    m->rest_t = rest ? m->rest_t + dt : 0;
     if (m->still_t >= HOS_MOTION_STILL_S && dt > 0) {
         const float k = dt / ((m->learned_t < 2 ? 0.25f : 3.0f) + dt);
         for (int i = 0; i < 3; i++) m->bias[i] += (m->gmean[i] - m->bias[i]) * k;

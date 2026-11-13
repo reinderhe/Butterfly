@@ -462,11 +462,17 @@ int hos_sdl_motion_history(HosMotionSample *out, int max) {
     ReleaseSRWLockShared(&state_lock);
     return n;
 }
-/* (butterfly) whether the pad with motion lies still (both sensors steady for HOS_MOTION_STILL_S), for IsSixAxisSensorAtRest:
-   Switch Sports calibrates with the Joy-Con laid on a table */
-int hos_sdl_motion_still(void) {
+/* (butterfly) whether the pad with motion lies at rest (HOS_MOTION_REST_*), for IsSixAxisSensorAtRest: Switch Sports
+   calibrates with the Joy-Con laid on a table. stats (may be null): the gyroscope's and accelerometer's spread and the
+   acceleration's size, for the log; -1 there with no motion pad */
+int hos_sdl_motion_still(float stats[3]) {
     AcquireSRWLockShared(&state_lock);
-    const int still = motion_live && motion.still_t >= HOS_MOTION_STILL_S;
+    const int still = motion_live && motion.rest_t >= HOS_MOTION_REST_S;
+    if (stats) {
+        stats[0] = motion_live ? sqrtf(motion.gvar) : -1;
+        stats[1] = motion_live ? sqrtf(motion.avar) : -1;
+        stats[2] = motion_live ? motion.amean : -1;
+    }
     ReleaseSRWLockShared(&state_lock);
     return still;
 }
