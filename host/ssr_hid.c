@@ -9,7 +9,7 @@
      +0x00 i64 sampling number   +0x08 i64 (kept the same while enabled)   +0x10 i64 the time since the one before (ns)
      +0x18 AccelerationType (read with GetG: here three floats, in G)
      +0x24 AngularVelocityType (read with GetDps: here three floats, in degrees a second)
-     +0x30 the orientation as a quaternion x, y, z, w      +0x40 u8 status (2 bits)
+     +0x30 the orientation as a quaternion x, y, z, w      +0x40 u8 status (2 bits: bit 1 calibrated)
    GetRotationMatrix gives the quaternion back as the 3x3 matrix (rows), the six-axis state's direction. */
 #include "hos.h"
 #include "hos_motion.h"
@@ -217,6 +217,9 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
         fusion_last += fusion_was_live ? HOS_MOTION_HISTORY : 1;
     }
     fusion_was_live = live > 0;
+    /* status (2 bits): bit 1 the sensors calibrated (the game's calibration screen waits for it, 0x80c7bd00) */
+    int hos_sdl_motion_calibrated(void);   /* pad_sdl.c */
+    const int status = live && hos_sdl_motion_calibrated() ? 2 : 0;
     static const HosMotionState at_rest = {{0, 0, -1}, {0, 0, 0}, {0, 0, 0}, {1, 0, 0, 0, 1, 0, 0, 0, 1}};
     const int n = live ? live : 1;
     for (int i = 0; i < n; i++) {
@@ -232,6 +235,7 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
         memcpy(GP(e + 0x18), m->accel, 12);
         memcpy(GP(e + 0x24), dps, 12);
         memcpy(GP(e + 0x30), q, 16);
+        *(uint8_t *)GP(e + 0x40) = (uint8_t)status;
     }
     HOS_WRITTEN(GP(out), (size_t)n * ENTRY);
     static int logged;

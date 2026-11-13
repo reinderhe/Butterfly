@@ -476,6 +476,18 @@ int hos_sdl_motion_still(float stats[3]) {
     ReleaseSRWLockShared(&state_lock);
     return still;
 }
+/* (butterfly) whether the motion pad's sensors are calibrated, as the Switch 2's sensor fusion reports it (its orientation's
+   status bit 1, which Switch Sports' calibration screen waits for): once it has lain at rest a moment (the gyroscope's
+   zero learned, or a second at rest by the looser test), and from then on */
+int hos_sdl_motion_calibrated(void) {
+    static volatile int calibrated;
+    if (calibrated) return 1;
+    AcquireSRWLockShared(&state_lock);
+    const int now = motion_live && (motion.learned_t >= 0.5f || motion.rest_t >= 1.0f);
+    ReleaseSRWLockShared(&state_lock);
+    if (now) calibrated = 1, hos_log("hid: the Joy-Con's motion sensors are calibrated (it lay at rest)");
+    return now;
+}
 /* (the Insert menu's Motion controls row) 0 no controller, 1 controllers with no gyroscope, 2 one with a gyroscope */
 int hos_sdl_gyro_status(void) { return (int)gyro_status; }
 /* The first open controller's name into out ("" with none) */
