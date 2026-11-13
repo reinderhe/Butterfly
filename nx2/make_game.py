@@ -2457,25 +2457,24 @@ def main(a=None):
     place_ngx_runtime(out)
     if fsr_wanted(a, out) and getattr(a, "fetch_fsr_runtime", False):
         place_fsr_runtime(out)
-    oot_only = _game.is_oot(work)   # (butterfly) the four below read Ocarina of Time's files or ship its recorded lists
+    oot_only = _game.is_oot(work)   # (butterfly) the prompts and shipped lists below are Ocarina of Time's
     if not oot_only:
-        # another game (Sports Resort): its shaders compile as it plays, it shows its own button icons, and the shipped
-        # pipeline lists (recorded from Ocarina of Time) would be built before its title for nothing. What an earlier
-        # build put in the folder goes (but longshot_pipelines.bin: the game's own cache grows in it as it is played)
-        for n in ("longshot_shaders.bin", "longshot_pipeline_states_shipped.bin"):
+        # another game (Sports Resort): it shows its own button icons, and the shipped pipeline lists (recorded from Ocarina
+        # of Time) would be built before its title for nothing. Its own shader list is made (below, from its own archives),
+        # and the player's own pipeline list (longshot_pipeline_states.bin) is kept: each new build's first start prepares
+        # those before the title. What an earlier build shipped goes (but longshot_pipelines.bin: the game's own cache)
+        for n in ("longshot_pipeline_states_shipped.bin",):
             try:
                 os.remove(os.path.join(out, n))
             except OSError:
                 pass
         shutil.rmtree(os.path.join(out, "prompts"), ignore_errors=True)
-        print("the shader list, the other controllers' button prompts and the shipped pipeline lists: Ocarina of Time's, "
-              "not made for %s" % _game.GAMES[_game.current(work)]["title"], flush=True)
+        print("the other controllers' button prompts and the shipped pipeline lists: Ocarina of Time's, not made for %s"
+              % _game.GAMES[_game.current(work)]["title"], flush=True)
     # every shader of the game, for its first start to translate (gpu/vk/vk_shader.cpp seed_open). Without it the game still runs, compiling them
     # as it meets them: not worth stopping a finished build for
     # (made again only when the game's shader files, the census or the list itself changed: 4 s and 514 MB written at every update)
-    if not oot_only:
-        pass
-    elif shader_list_current(work, romfs, os.path.join(out, "longshot_shaders.bin")):
+    if shader_list_current(work, romfs, os.path.join(out, "longshot_shaders.bin")):
         print("the shader list is the one the last build made from the same files: not made again", flush=True)
     elif run(shader_census_cmd(romfs, os.path.join(out, "longshot_shaders.bin")), check=False, output=sys.stderr):
         print("the shader list was not made: the game will compile its shaders as it plays", flush=True)
