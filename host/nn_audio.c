@@ -2016,7 +2016,7 @@ HLE(_ZN2nn5audio23IsLightLimiterRemovableEPKNS0_16LightLimiterTypeE) { RET(1); }
 
 /* (butterfly) Sports Resort's: removable at once (a removal waits on Is*Removable: IsDelayRemovable answered 0 hung the
    way back to the menu), the delay's own buffer handed back by its removal (kept in the DelayType's pointer), the rest of
-   the removals' buffers left to the game (0) */
+   the removals' buffers left to the game (0); (longshot) its aux effect is Longshot's own, above */
 HLE(_ZN2nn5audio8AddDelayEPNS0_19AudioRendererConfigEPNS0_9DelayTypeEPvmPNS0_10SubMixTypeENS_8TimeSpanEi) {
     if (hos_guest_range(ARG(1), 8)) G64(ARG(1)) = ARG(2);
     RET(0);
@@ -2043,10 +2043,6 @@ HLE(_ZN2nn5audio20SetDelayFeedbackGainEPNS0_9DelayTypeEf) {}
 HLE(_ZN2nn5audio21SetDelayChannelSpreadEPNS0_9DelayTypeEf) {}
 HLE(_ZN2nn5audio21SetDelayLowPassAmountEPNS0_9DelayTypeEf) {}
 HLE(_ZN2nn5audio19SetDelayInputOutputEPNS0_9DelayTypeEPKaS4_i) {}
-HLE(_ZN2nn5audio13SetAuxEnabledEPNS0_7AuxTypeEb) {}
-HLE(_ZN2nn5audio17SetAuxInputOutputEPNS0_7AuxTypeEPKaS4_i) {}
-HLE(_ZN2nn5audio9RemoveAuxEPNS0_19AudioRendererConfigEPNS0_7AuxTypeEPNS0_10SubMixTypeE) { RET(0); }
-HLE(_ZN2nn5audio9RemoveAuxEPNS0_19AudioRendererConfigEPNS0_7AuxTypeEPNS0_12FinalMixTypeE) { RET(0); }
 HLE(_ZN2nn5audio18IsCaptureRemovableEPKNS0_11CaptureTypeE) { RET(1); }
 HLE(_ZN2nn5audio21IsCompressorRemovableEPKNS0_14CompressorTypeE) { RET(1); }
 
