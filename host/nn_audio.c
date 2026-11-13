@@ -1647,6 +1647,42 @@ HLE(_ZN2nn5audio22IsI3dl2ReverbRemovableEPKNS0_15I3dl2ReverbTypeE) { RET(1); }
 HLE(_ZN2nn5audio23IsBiquadFilterRemovableEPKNS0_16BiquadFilterTypeE) { RET(1); }
 HLE(_ZN2nn5audio23IsLightLimiterRemovableEPKNS0_16LightLimiterTypeE) { RET(1); }
 
+/* (butterfly) Sports Resort's: removable at once (a removal waits on Is*Removable: IsDelayRemovable answered 0 hung the
+   way back to the menu), the delay's own buffer handed back by its removal (kept in the DelayType's pointer), the rest of
+   the removals' buffers left to the game (0) */
+HLE(_ZN2nn5audio8AddDelayEPNS0_19AudioRendererConfigEPNS0_9DelayTypeEPvmPNS0_10SubMixTypeENS_8TimeSpanEi) {
+    if (hos_guest_range(ARG(1), 8)) G64(ARG(1)) = ARG(2);
+    RET(0);
+}
+HLE(_ZN2nn5audio8AddDelayEPNS0_19AudioRendererConfigEPNS0_9DelayTypeEPvmPNS0_12FinalMixTypeENS_8TimeSpanEi) {
+    if (hos_guest_range(ARG(1), 8)) G64(ARG(1)) = ARG(2);
+    RET(0);
+}
+static void remove_delay(Ctx *c) {
+    uint64_t buf = 0;
+    if (hos_guest_range(ARG(1), 8)) buf = G64(ARG(1)), G64(ARG(1)) = 0;
+    RET(buf);
+}
+HLE(_ZN2nn5audio11RemoveDelayEPNS0_19AudioRendererConfigEPNS0_9DelayTypeEPNS0_10SubMixTypeE) { remove_delay(c); }
+HLE(_ZN2nn5audio11RemoveDelayEPNS0_19AudioRendererConfigEPNS0_9DelayTypeEPNS0_12FinalMixTypeE) { remove_delay(c); }
+HLE(_ZN2nn5audio16IsDelayRemovableEPKNS0_9DelayTypeE) { RET(1); }
+HLE(_ZN2nn5audio14IsDelayEnabledEPKNS0_9DelayTypeE) { RET(1); }
+HLE(_ZN2nn5audio15SetDelayEnabledEPNS0_9DelayTypeEb) {}
+HLE(_ZN2nn5audio12GetDelayTimeEPKNS0_9DelayTypeE) { RET(0); }
+HLE(_ZN2nn5audio12SetDelayTimeEPNS0_9DelayTypeENS_8TimeSpanE) {}
+HLE(_ZN2nn5audio14SetDelayInGainEPNS0_9DelayTypeEf) {}
+HLE(_ZN2nn5audio15SetDelayDryGainEPNS0_9DelayTypeEf) {}
+HLE(_ZN2nn5audio20SetDelayFeedbackGainEPNS0_9DelayTypeEf) {}
+HLE(_ZN2nn5audio21SetDelayChannelSpreadEPNS0_9DelayTypeEf) {}
+HLE(_ZN2nn5audio21SetDelayLowPassAmountEPNS0_9DelayTypeEf) {}
+HLE(_ZN2nn5audio19SetDelayInputOutputEPNS0_9DelayTypeEPKaS4_i) {}
+HLE(_ZN2nn5audio13SetAuxEnabledEPNS0_7AuxTypeEb) {}
+HLE(_ZN2nn5audio17SetAuxInputOutputEPNS0_7AuxTypeEPKaS4_i) {}
+HLE(_ZN2nn5audio9RemoveAuxEPNS0_19AudioRendererConfigEPNS0_7AuxTypeEPNS0_10SubMixTypeE) { RET(0); }
+HLE(_ZN2nn5audio9RemoveAuxEPNS0_19AudioRendererConfigEPNS0_7AuxTypeEPNS0_12FinalMixTypeE) { RET(0); }
+HLE(_ZN2nn5audio18IsCaptureRemovableEPKNS0_11CaptureTypeE) { RET(1); }
+HLE(_ZN2nn5audio21IsCompressorRemovableEPKNS0_14CompressorTypeE) { RET(1); }
+
 /* ---- the light limiter on the final mix: input gain, then a peak limiter at the threshold, then output gain ---- */
 HLE(_ZN2nn5audio24SetLightLimiterInputGainEPNS0_16LightLimiterTypeEf) { lim_in = farg(c, 0); AUT("audio: limiter input gain %.3f", lim_in); }
 HLE(_ZN2nn5audio25SetLightLimiterOutputGainEPNS0_16LightLimiterTypeEf) { lim_out = farg(c, 0); AUT("audio: limiter output gain %.3f", lim_out); }
