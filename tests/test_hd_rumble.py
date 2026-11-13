@@ -248,6 +248,7 @@ static int hos_sdl_pad_effect(void *pad, const void *data, int size) {
     return fake_ok;
 }
 static const char *hos_sdl_pad_name(void *pad) { (void)pad; return "pad"; }
+static void hos_sdl_pad_player(void *pad, int player) { (void)pad; (void)player; }   /* (butterfly: the player lights) */
 static const char *hos_sdl_error(void) { return "unsupported"; }
 static void hos_log(const char *fmt, ...) { (void)fmt; logged++; }
 %(open)s

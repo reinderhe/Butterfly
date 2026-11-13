@@ -21,6 +21,7 @@ static struct {
     /* controllers */
     void *PadOpen, *PadClose, *PadConnected, *PadsUpdate, *PadButton, *PadAxis, *PadName, *PadRumble;
     void *PadType, *PadEffect;   /* (optional: HD rumble, host/pad_sdl.c) */
+    void *PadPlayerIndex;   /* (butterfly, optional: the player lights) */
     void *PadHasSensor, *PadSensorEnable, *PadSensorData;   /* (motion: optional, NULL in an SDL without them) */
     void *PadVendor, *PadSteamHandle, *SetHintPriority;   /* (Steam's stand-in pads: optional, host/steam_pads.h) */
     void *JoystickGUID, *PadMapping;   /* (optional connection diagnostics: no serial number or device path) */
@@ -69,6 +70,7 @@ static int get_all(HMODULE m, int three) {
     /* (SDL2 2.0.12 and 2.0.16 on, SDL3 3.2 on: without them every pad keeps the motor rumble) */
     *(FARPROC *)&f.PadType = GetProcAddress(m, three ? "SDL_GetGamepadType" : "SDL_GameControllerGetType");
     *(FARPROC *)&f.PadEffect = GetProcAddress(m, three ? "SDL_SendGamepadEffect" : "SDL_GameControllerSendEffect");
+    *(FARPROC *)&f.PadPlayerIndex = GetProcAddress(m, three ? "SDL_SetGamepadPlayerIndex" : "SDL_GameControllerSetPlayerIndex");
     /* (motion sensors: SDL 2.0.14 on and every SDL3; without them the pads still play, with no gyro) */
     *(FARPROC *)&f.PadHasSensor = GetProcAddress(m, three ? "SDL_GamepadHasSensor" : "SDL_GameControllerHasSensor");
     *(FARPROC *)&f.PadSensorEnable = GetProcAddress(m, three ? "SDL_SetGamepadSensorEnabled" : "SDL_GameControllerSetSensorEnabled");
@@ -673,6 +675,12 @@ void hos_sdl_pad_rumble(void *pad, uint16_t low, uint16_t high, uint32_t ms) {
 }
 int hos_sdl_pad_type(void *pad) { return f.PadType ? CALL(int (*)(void *), PadType)(pad) : 0; }
 int hos_sdl_pad_has_effect(void) { return f.PadEffect != NULL; }
+/* (butterfly) the player a pad shows on its lights (0 the first; a Switch controller lights that many from the left) */
+void hos_sdl_pad_player(void *pad, int player) {
+    if (!f.PadPlayerIndex) return;
+    if (version == 3) CALL(_Bool (*)(void *, int), PadPlayerIndex)(pad, player);
+    else CALL(void (*)(void *, int), PadPlayerIndex)(pad, player);
+}
 int hos_sdl_pad_effect(void *pad, const void *data, int size) {
     if (!f.PadEffect) return 0;
     if (version == 3) return CALL(_Bool (*)(void *, const void *, int), PadEffect)(pad, data, size);

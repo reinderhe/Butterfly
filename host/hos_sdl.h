@@ -82,6 +82,7 @@ void hos_sdl_pad_rumble(void *pad, uint16_t low, uint16_t high, uint32_t ms);
    SDL_GameControllerSendEffect): 1 when SDL took it */
 int hos_sdl_pad_type(void *pad);
 int hos_sdl_pad_has_effect(void);
+void hos_sdl_pad_player(void *pad, int player);   /* (butterfly) the player lights: 0 the first */
 int hos_sdl_pad_effect(void *pad, const void *data, int size);
 /* motion sensors (SDL_SENSOR_ACCEL m/s^2, SDL_SENSOR_GYRO rad/s, three values each): 0 when the pad or the SDL has none */
 enum { HOS_SDL_SENSOR_ACCEL = 1, HOS_SDL_SENSOR_GYRO = 2 };

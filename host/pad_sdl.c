@@ -154,6 +154,9 @@ static void hd_open(int i, void *gc) {
         env_off = e && !strcmp(e, "0");
     }
     pads[i].hd_kind = (uint8_t)hd_rumble_kind(hos_sdl_load(), hos_sdl_pad_type(gc));
+    /* (butterfly) a Joy-Con is one half of player 1's pair: player 1's light, as on the console (SDL numbers each pad its
+       own player, so a Joy-Con opened second showed player 2's two lights) */
+    if (pads[i].hd_kind == HD_RUMBLE_JOYCON_LEFT || pads[i].hd_kind == HD_RUMBLE_JOYCON_RIGHT) hos_sdl_pad_player(gc, 0);
     pads[i].hd = (uint8_t)hd_rumble_start(pads[i].hd_kind, hos_sdl_pad_has_effect(), env_off);
     pads[i].hd_ever = 0;
     pads[i].hd_ns = 0;
@@ -307,6 +310,79 @@ static void motion_poll(int64_t now, int count) {
     if (motion_count < HOS_MOTION_HISTORY) motion_count++;
     motion_live = 1;
     ReleaseSRWLockExclusive(&state_lock);
+}
+
+/* (butterfly) A motion filter for each Joy-Con of a pair, besides the one above (which follows the pad used last, as
+   Ocarina of Time and a single controller want): Sports Resort reads each Joy-Con's own motion, the left one (a bow, a
+   shield) apart from the right one (the string, the sword). With SDL's Joy-Cons uncombined (host/hos_main.c
+   game_switches) each is a pad of its own; side 0 is the left one open, 1 the right one. The same Motion settings as
+   the main filter. Read by host/ssr_hid.c's sensor fusion, a handle each side */
+typedef struct {
+    HosMotion f;
+    int pad, live, head, count, calibrated;
+    uint32_t serial;
+    int64_t ns, reading_ns, readings;
+    HosMotionSample hist[HOS_MOTION_HISTORY];
+} SideMotion;
+static SideMotion side_motion[2] = {{.pad = -1}, {.pad = -1}};
+static void side_motion_poll(int64_t now) {
+    int rx_option(int id, int otherwise);
+    const int want = rx_option(HOS_OPT_GYRO, 1) != 0;
+    for (int side = 0; side < 2; side++) {
+        SideMotion *m = &side_motion[side];
+        const int kind = side ? HD_RUMBLE_JOYCON_RIGHT : HD_RUMBLE_JOYCON_LEFT;
+        int pick = -1;
+        for (int i = 0; i < MAX_PADS && pick < 0; i++)
+            if (pads[i].gc && pads[i].motion && pads[i].motion_on && pads[i].hd_kind == kind) pick = i;
+        float a[3], g[3];
+        const int read = want && pick >= 0 && hos_sdl_pad_sensor(pads[pick].gc, HOS_SDL_SENSOR_ACCEL, a, 3) &&
+                         hos_sdl_pad_sensor(pads[pick].gc, HOS_SDL_SENSOR_GYRO, g, 3);
+        if (!read) {
+            if (m->live) {
+                AcquireSRWLockExclusive(&state_lock);
+                m->live = 0, m->count = 0;
+                ReleaseSRWLockExclusive(&state_lock);
+            }
+            m->pad = -1;
+            continue;
+        }
+        int fresh = 0;
+        if (pick != m->pad || pads[pick].serial != m->serial) {
+            hos_motion_reset(&m->f);
+            if (pads[pick].has_bias) memcpy(m->f.bias, pads[pick].bias, sizeof m->f.bias), m->f.learned_t = pads[pick].bias_t;
+            m->pad = pick, m->serial = pads[pick].serial, m->ns = now, m->calibrated = 0;
+            fresh = 1;
+            hos_log("hid: the %s Joy-Con's own motion from \"%s\"", side ? "right" : "left", hos_sdl_pad_name(pads[pick].gc));
+        }
+        const int64_t dt_ns = now - m->ns;
+        m->ns = now;
+        {
+            static const float zone[3] = {HOS_MOTION_THRESHOLD_TIGHT, HOS_MOTION_THRESHOLD, HOS_MOTION_THRESHOLD_LOOSE};
+            const int z = rx_option(HOS_OPT_GYRO_DEADZONE, 1);
+            m->f.threshold = zone[z < 0 ? 0 : z > 2 ? 2 : z];
+        }
+        if (!hos_motion_update(&m->f, a, g, (float)(dt_ns / 1e9), rx_option(HOS_OPT_GYRO_SENS_X, 100) / 100.0f,
+                               rx_option(HOS_OPT_GYRO_SENS_Y, 100) / 100.0f, rx_option(HOS_OPT_GYRO_INV_X, 0),
+                               rx_option(HOS_OPT_GYRO_INV_Y, 0)) && !fresh)
+            continue;
+        if (!m->calibrated && (m->f.learned_t >= 0.5f || m->f.rest_t >= 1.0f)) {
+            m->calibrated = 1;
+            hos_log("hid: the %s Joy-Con's motion sensors are calibrated (it lay at rest)", side ? "right" : "left");
+        }
+        HosMotionSample r;
+        r.st = m->f.out;
+        r.n = ++m->readings;
+        r.dt_ns = fresh ? 5000000 : now - m->reading_ns;
+        if (r.dt_ns > (int64_t)(HOS_MOTION_DT_MAX * 1e9)) r.dt_ns = (int64_t)(HOS_MOTION_DT_MAX * 1e9);
+        m->reading_ns = now;
+        AcquireSRWLockExclusive(&state_lock);
+        m->head = (m->head + 1) % HOS_MOTION_HISTORY;
+        m->hist[m->head] = r;
+        if (fresh) m->count = 0;
+        if (m->count < HOS_MOTION_HISTORY) m->count++;
+        m->live = 1;
+        ReleaseSRWLockExclusive(&state_lock);
+    }
 }
 
 /* (longshot) a motion-only pad's own presses (host/steam_pads.h): they are not the game's input, but they still mark it
@@ -477,6 +553,7 @@ static void pads_poll(void) {
             }
         }
         motion_poll(now, count);
+        side_motion_poll(now);   /* (butterfly) each Joy-Con's own, for Sports Resort */
         AcquireSRWLockExclusive(&state_lock);
         state_buttons = b;
         memcpy(state_stick, s, sizeof s);
@@ -553,6 +630,30 @@ int hos_sdl_motion_history(HosMotionSample *out, int max) {
     ReleaseSRWLockShared(&state_lock);
     return n;
 }
+/* (butterfly, host/ssr_hid.c) the motion of one device, newest first: dev 0 the left Joy-Con, 1 the right one (each its
+   own filter, side_motion_poll), else, or when that Joy-Con has none, the pad used last (hos_sdl_motion_history). *src:
+   which it came from (0 left, 1 right, 2 the main filter), so a reader can start afresh when it changes; *calibrated:
+   whether that one's sensors have lain at rest a moment (the fusion's status bit 1) */
+int hos_sdl_motion_calibrated(void);
+int hos_sdl_motion_history_dev(int dev, HosMotionSample *out, int max, int *src, int *calibrated) {
+    if (dev == 0 || dev == 1) {
+        const SideMotion *m = &side_motion[dev];
+        AcquireSRWLockShared(&state_lock);
+        const int n = !m->live ? 0 : m->count < max ? m->count : max;
+        for (int i = 0; i < n; i++) out[i] = m->hist[(m->head - i + HOS_MOTION_HISTORY) % HOS_MOTION_HISTORY];
+        const int cal = m->calibrated;
+        ReleaseSRWLockShared(&state_lock);
+        if (n) {
+            *src = dev, *calibrated = cal;
+            return n;
+        }
+    }
+    *src = 2;
+    const int n = hos_sdl_motion_history(out, max);
+    *calibrated = n && hos_sdl_motion_calibrated();
+    return n;
+}
+
 /* (butterfly) whether the pad with motion lies at rest (HOS_MOTION_REST_*), for IsSixAxisSensorAtRest: Switch Sports
    calibrates with the Joy-Con laid on a table. stats (may be null): the gyroscope's and accelerometer's spread and the
    acceleration's size, for the log; -1 there with no motion pad */

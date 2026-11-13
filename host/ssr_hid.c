@@ -81,39 +81,54 @@ HLE(_ZN2nn3hid25SetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleERKNS0_22Gy
 /* ---- sensor fusion ---------------------------------------------------------------------------------------------- */
 #define FUSION_HANDLE 0x5346u   /* ("SF") */
 #define ENTRY 0x50
-static volatile int fusion_on[2];   /* (each Joy-Con of the pair: its own handle, FUSION_HANDLE + 0 left, + 1 right, both
-                                       the one motion pad's; the game turns them on and off one at a time) */
-static int fusion_slot(uint32_t h) { return h == FUSION_HANDLE + 1 ? 1 : h == FUSION_HANDLE ? 0 : -1; }
-static float yaw_fix[4] = {0, 0, 0, 1};   /* applied on the world's side (ResetSensorFusionYaw) */
+/* The devices a handle names: FUSION_HANDLE + 0 the left Joy-Con, + 1 the right one, each with its own motion (pad_sdl.c
+   hos_sdl_motion_history_dev: archery aims with the left and draws with the right), + 2 a controller of its own (a lone
+   Joy-Con's style that is neither, a Pro Controller: the pad used last). Each its own on/off, yaw reset, orientation and
+   sampling numbers; the game turns them on and off one at a time */
+#define FUSION_DEVS 3
+static const char *const dev_name[FUSION_DEVS] = {"left Joy-Con", "right Joy-Con", "controller"};
+static volatile int fusion_on[FUSION_DEVS];
+static int fusion_slot(uint32_t h) { return h >= FUSION_HANDLE && h < FUSION_HANDLE + FUSION_DEVS ? (int)(h - FUSION_HANDLE) : -1; }
+static float yaw_fixes[FUSION_DEVS][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}};   /* on the world's side (ResetSensorFusionYaw) */
 static SRWLOCK fusion_lock = SRWLOCK_INIT;
-static int64_t fusion_base, fusion_last;
-static int fusion_was_live;
+static int64_t fusion_base[FUSION_DEVS], fusion_last[FUSION_DEVS];
+static int fusion_was_live[FUSION_DEVS], fusion_src[FUSION_DEVS] = {-1, -1, -1};
+int hos_sdl_motion_history_dev(int dev, HosMotionSample *out, int max, int *src, int *calibrated);   /* pad_sdl.c */
 
 HLE(_ZN2nn3hid25GetSensorFusionMemorySizeEv) { RET(0x1000); }
 HLE(_ZN2nn3hid29GetSensorFusionWorkBufferSizeEv) { RET(0x1000); }
 HLE(_ZN2nn3hid22InitializeSensorFusionEPvm) { RET(0); }
-HLE(_ZN2nn3hid20FinalizeSensorFusionEv) { fusion_on[0] = fusion_on[1] = 0; hos_log("hid: sensor fusion finalized"); }
+HLE(_ZN2nn3hid20FinalizeSensorFusionEv) {
+    for (int k = 0; k < FUSION_DEVS; k++) fusion_on[k] = 0;
+    hos_log("hid: sensor fusion finalized");
+}
 /* GetSensorFusionHandles(SensorFusionHandle*, int, unsigned int const& npad, BitFlagSet styles) -> int: No.1's, one per
-   Joy-Con a pair has (left, right: the game picks min(count - 1, its Joy-Con's index)), else one */
+   Joy-Con a pair has (left, right: the game picks min(count - 1, its Joy-Con's index)), else one: a lone Joy-Con's own,
+   or the controller's */
 HLE(_ZN2nn3hid22GetSensorFusionHandlesEPNS0_18SensorFusionHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {
     static int logged;
     if (logged++ < 4) hos_log("hid: sensor fusion handles asked for: npad %u, %d wanted, styles %#x", G32(ARG(2)), (int)ARG(1),
                               (uint32_t)ARG(3));
     if ((int)ARG(1) < 1 || G32(ARG(2)) != NPAD_NO1) { RET(0); return; }
     const int n = (int)ARG(1) >= 2 && ((uint32_t)ARG(3) & STYLE_JOYDUAL) ? 2 : 1;
-    for (int i = 0; i < n; i++) G32(ARG(0) + 4 * (uint64_t)i) = FUSION_HANDLE + (uint32_t)i;
+    if (n == 2) {
+        G32(ARG(0)) = FUSION_HANDLE, G32(ARG(0) + 4) = FUSION_HANDLE + 1;
+    } else {
+        const uint32_t style = hos_npad_style();
+        G32(ARG(0)) = FUSION_HANDLE + (style == STYLE_JOYLEFT ? 0 : style == STYLE_JOYRIGHT ? 1 : 2);
+    }
     RET(n);
 }
 HLE(_ZN2nn3hid18EnableSensorFusionENS0_18SensorFusionHandleEPvm) {
     const int k = fusion_slot((uint32_t)ARG(0));
     if (k < 0) { RET(0); return; }
-    if (!fusion_on[k]) hos_log("hid: sensor fusion on for the %s Joy-Con (the orientation from the motion controls)", k ? "right" : "left");
+    if (!fusion_on[k]) hos_log("hid: sensor fusion on for the %s (the orientation from the motion controls)", dev_name[k]);
     fusion_on[k] = 1;
     RET(0);
 }
 HLE(_ZN2nn3hid19DisableSensorFusionENS0_18SensorFusionHandleE) {
     const int k = fusion_slot((uint32_t)ARG(0));
-    if (k >= 0 && fusion_on[k]) hos_log("hid: sensor fusion off for the %s Joy-Con", k ? "right" : "left");
+    if (k >= 0 && fusion_on[k]) hos_log("hid: sensor fusion off for the %s", dev_name[k]);
     if (k >= 0) fusion_on[k] = 0;
     RET(0);
 }
@@ -190,11 +205,11 @@ static void device_quat(const float *direction, float q[4]) {
     quat_mul(raw, f, q);
 }
 /* the orientation handed out: that, turned about the world's up (z) by the yaw reset */
-static void fused(const HosMotionState *m, float q[4]) {
+static void fused(const HosMotionState *m, int dev, float q[4]) {
     float d[4];
     device_quat(m->direction, d);
     AcquireSRWLockShared(&fusion_lock);
-    quat_mul(yaw_fix, d, q);
+    quat_mul(yaw_fixes[dev], d, q);
     ReleaseSRWLockShared(&fusion_lock);
 }
 /* The orientation integrated from the very angular velocity and acceleration handed out with it (+0x24, +0x18), so the
@@ -204,8 +219,8 @@ static void fused(const HosMotionState *m, float q[4]) {
    accelerometer reading 0, 0, -1 G) is no turn, and the yaw is the game's to reset. BUTTERFLY_MOTION_FLIP set: the
    direction-matrix orientation instead (the earlier tries). */
 static SRWLOCK integ_lock = SRWLOCK_INIT;
-static float integ_q[4] = {0, 0, 0, 1};
-static float integ_ring[HOS_MOTION_HISTORY][4];
+static float integ_qs[FUSION_DEVS][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}};   /* (each device's own) */
+static float integ_rings[FUSION_DEVS][HOS_MOTION_HISTORY][4];
 static int use_integration(void) {
     static int v = -1;
     if (v < 0) {
@@ -242,7 +257,7 @@ static void q_from_accel(const float *a, float flat, float q[4]) {
 static const signed char axes_sign[8][3] = {{-1, 1, -1}, {1, 1, 1}, {1, -1, 1}, {-1, -1, 1},
                                              {1, -1, -1}, {-1, 1, 1}, {1, 1, -1}, {-1, -1, -1}};
 static volatile int axes_pick = -1;
-static int64_t integ_n = -1;   /* the newest reading integrated (its own count) */
+static int64_t integ_ns[FUSION_DEVS] = {-1, -1, -1};   /* the newest reading integrated (its own count), each device */
 /* The orientation handed out the other way round (world to Joy-Con, the conjugate): with all axes turned around (variant
    7) that gives the game its pitch, pointing and bank all the right way (with z turned around (6) the plane was right
    but table tennis's pointing mirrored; with x and z (0), the bank). BUTTERFLY_MOTION_CONJ=0 (the environment) hands it
@@ -271,7 +286,7 @@ static void fusion_axes(const HosMotionState *m, int v, float a[3], float g[3]) 
     const int det = t[0] * t[1] * t[2];
     for (int k = 0; k < 3; k++) a[k] = t[k] * m->accel[k], g[k] = (float)(det * t[k]) * m->gyro[k];
 }
-static void integrate_one(const HosMotionSample *s, int v) {
+static void integrate_one(const HosMotionSample *s, int v, float *integ_q) {
     HosMotionState mm;
     fusion_axes(&s->st, v, mm.accel, mm.gyro);
     const HosMotionState *m = &mm;
@@ -299,8 +314,11 @@ static void integrate_one(const HosMotionSample *s, int v) {
     q_norm(integ_q);
 }
 /* each reading of h (newest first) its integrated orientation, into qs */
-static void integrated(const HosMotionSample *h, int live, int v, float qs[][4]) {
+static void integrated(const HosMotionSample *h, int live, int v, int dev, float qs[][4]) {
     AcquireSRWLockExclusive(&integ_lock);
+    float *integ_q = integ_qs[dev];
+    float (*integ_ring)[4] = integ_rings[dev];
+    int64_t integ_n = integ_ns[dev];
     if (integ_n < 0 || h[0].n < integ_n) {
         float a0[3], g0[3];
         fusion_axes(&h[live - 1].st, v, a0, g0);
@@ -311,7 +329,7 @@ static void integrated(const HosMotionSample *h, int live, int v, float qs[][4])
     }
     for (int i = live - 1; i >= 0; i--) {
         if (h[i].n <= integ_n) continue;
-        integrate_one(&h[i], v);
+        integrate_one(&h[i], v, integ_q);
         integ_n = h[i].n;
         memcpy(integ_ring[integ_n % HOS_MOTION_HISTORY], integ_q, 16);
     }
@@ -319,17 +337,19 @@ static void integrated(const HosMotionSample *h, int live, int v, float qs[][4])
         if (integ_n - h[i].n < HOS_MOTION_HISTORY) memcpy(qs[i], integ_ring[h[i].n % HOS_MOTION_HISTORY], 16);
         else memcpy(qs[i], integ_q, 16);
     }
+    integ_ns[dev] = integ_n;
     ReleaseSRWLockExclusive(&integ_lock);
 }
-/* ResetSensorFusionYaw(handle): the way the Joy-Con points now is straight ahead */
+/* ResetSensorFusionYaw(handle): the way that device points now is straight ahead */
 HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
-    int hos_sdl_motion_history(HosMotionSample *out, int max);   /* pad_sdl.c */
+    const int dev = fusion_slot((uint32_t)ARG(0));
     HosMotionSample h[1];
-    if (hos_sdl_motion_history(h, 1) == 1) {
+    int src, cal;
+    if (dev >= 0 && hos_sdl_motion_history_dev(dev, h, 1, &src, &cal) == 1) {
         float d[4], m[9];
         if (use_integration()) {
             AcquireSRWLockShared(&integ_lock);
-            memcpy(d, integ_q, sizeof d);
+            memcpy(d, integ_qs[dev], sizeof d);
             ReleaseSRWLockShared(&integ_lock);
         } else {
             device_quat(h[0].st.direction, d);
@@ -337,7 +357,8 @@ HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
         matrix_of(d, m);
         const float yaw = atan2f(m[3], m[0]);   /* (the Joy-Con's x axis in the world: column 0) */
         AcquireSRWLockExclusive(&fusion_lock);
-        yaw_fix[0] = yaw_fix[1] = 0, yaw_fix[2] = sinf(-yaw / 2), yaw_fix[3] = cosf(-yaw / 2);
+        float *y = yaw_fixes[dev];
+        y[0] = y[1] = 0, y[2] = sinf(-yaw / 2), y[3] = cosf(-yaw / 2);
         ReleaseSRWLockExclusive(&fusion_lock);
     }
     RET(0);
@@ -347,20 +368,31 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
     const uint64_t out = ARG(0);
     const int max = (int)ARG(1) < 1 ? 0 : (int)ARG(1) > HOS_MOTION_HISTORY ? HOS_MOTION_HISTORY : (int)ARG(1);
     if (!max || !hos_guest_range(out, (uint64_t)max * ENTRY)) { RET(0); return; }
-    int hos_sdl_motion_history(HosMotionSample *out, int max);   /* pad_sdl.c */
+    const int k = fusion_slot((uint32_t)ARG(2));
+    const int dev = k >= 0 ? k : 2;
     HosMotionSample h[HOS_MOTION_HISTORY];
-    const int live = hos_sdl_motion_history(h, max);
-    /* (sampling numbers as GetSixAxisSensorStates hands them out: always on, a whole history apart between live and rest) */
-    if (live) {
-        if (!fusion_was_live || fusion_base + h[0].n < fusion_last) fusion_base = fusion_last + HOS_MOTION_HISTORY - h[0].n;
-        fusion_last = fusion_base + h[0].n;
-    } else {
-        fusion_last += fusion_was_live ? HOS_MOTION_HISTORY : 1;
+    int src = 2, calibrated = 0;
+    const int live = hos_sdl_motion_history_dev(dev, h, max, &src, &calibrated);
+    /* (another source than last time, the left Joy-Con's own after the pad used last, say: its own reading numbers, so
+       its orientation starts afresh from gravity and its sampling numbers go on past the last ones) */
+    if (live && src != fusion_src[dev]) {
+        fusion_was_live[dev] = 0;
+        AcquireSRWLockExclusive(&integ_lock);
+        integ_ns[dev] = -1;
+        ReleaseSRWLockExclusive(&integ_lock);
+        fusion_src[dev] = src;
     }
-    fusion_was_live = live > 0;
+    /* (sampling numbers as GetSixAxisSensorStates hands them out: always on, a whole history apart between live and rest) */
+    int64_t *base = &fusion_base[dev], *last = &fusion_last[dev];
+    if (live) {
+        if (!fusion_was_live[dev] || *base + h[0].n < *last) *base = *last + HOS_MOTION_HISTORY - h[0].n;
+        *last = *base + h[0].n;
+    } else {
+        *last += fusion_was_live[dev] ? HOS_MOTION_HISTORY : 1;
+    }
+    fusion_was_live[dev] = live > 0;
     /* status (2 bits): bit 1 the sensors calibrated (the game's calibration screen waits for it, 0x80c7bd00) */
-    int hos_sdl_motion_calibrated(void);   /* pad_sdl.c */
-    const int status = live && hos_sdl_motion_calibrated() ? 2 : 0;
+    const int status = live && calibrated ? 2 : 0;
     static const HosMotionState at_rest = {{0, 0, -1}, {0, 0, 0}, {0, 0, 0}, {1, 0, 0, 0, 1, 0, 0, 0, 1}};
     const int n = live ? live : 1;
     static float qs[HOS_MOTION_HISTORY][4];   /* (under the history's own order: one caller at a time below) */
@@ -368,17 +400,17 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
     const int integ = use_integration() && live;
     AcquireSRWLockExclusive(&out_lock);
     const int axv = motion_axes(), cj = motion_conj();
-    if (integ) integrated(h, live, axv, qs);
+    if (integ) integrated(h, live, axv, dev, qs);
     for (int i = 0; i < n; i++) {
         const uint64_t e = out + (uint64_t)i * ENTRY;
         const HosMotionState *m = live ? &h[i].st : &at_rest;
         float q[4], dps[3];
         if (integ) {
             AcquireSRWLockShared(&fusion_lock);
-            quat_mul(yaw_fix, qs[i], q);
+            quat_mul(yaw_fixes[dev], qs[i], q);
             ReleaseSRWLockShared(&fusion_lock);
         } else {
-            fused(m, q);
+            fused(m, dev, q);
         }
         float acc[3], rev[3];
         if (integ) fusion_axes(m, axv, acc, rev);
@@ -400,7 +432,7 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
         }
         for (int k = 0; k < 3; k++) dps[k] = rev[k] * 360.0f;
         memset(GP(e), 0, ENTRY);
-        G64(e) = (uint64_t)(live ? fusion_base + h[i].n : fusion_last - i);
+        G64(e) = (uint64_t)(live ? *base + h[i].n : *last - i);
         G64(e + 8) = 1;
         G64(e + 0x10) = (uint64_t)(live && h[i].dt_ns > 0 ? h[i].dt_ns : 5000000);
         memcpy(GP(e + 0x18), acc, 12);
@@ -411,7 +443,11 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
     ReleaseSRWLockExclusive(&out_lock);
     HOS_WRITTEN(GP(out), (size_t)n * ENTRY);
     static int logged;
-    if (!logged++) hos_log("hid: sensor fusion: first orientations (%s)", live ? "a pad with motion" : "no pad with motion: at rest");
+    if (!(logged & 1 << dev)) {
+        logged |= 1 << dev;
+        hos_log("hid: sensor fusion: the %s's first orientations (%s)", dev_name[dev],
+                !live ? "no pad with motion: at rest" : src == 2 ? "the pad used last" : src ? "the right Joy-Con's own" : "the left Joy-Con's own");
+    }
     RET(n);
 }
 /* the three float returns of GetG / GetDps (s0, s1, s2) */
