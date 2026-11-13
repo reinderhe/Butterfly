@@ -179,29 +179,39 @@ static void quat_mul(const float a[4], const float b[4], float o[4]) {
     o[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
     o[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
 }
-/* The Joy-Con's own axes as the Switch 2's fusion has them: the motion filter's turned half a turn about one of its axes.
-   Without it the game's calibrated aim had both pitch and yaw backwards (roll right), a half turn about the long axis (y).
-   BUTTERFLY_MOTION_FLIP=x, y, z or none (in diagnostics.bat or the environment) tries another, with no rebuild. */
-static const float *device_flip(void) {
-    static const float flips[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};   /* x, y, z, none */
-    static int k = -1;
-    if (k < 0) {
-        const char *e = getenv("BUTTERFLY_MOTION_FLIP");
-        int pick = 1;
-        if (e && (*e == 'x' || *e == 'X')) pick = 0;
-        else if (e && (*e == 'z' || *e == 'Z')) pick = 2;
-        else if (e && (*e == 'n' || *e == 'N' || *e == '0')) pick = 3;
-        hos_log("hid: sensor fusion: the Joy-Con turned half a turn about %s (BUTTERFLY_MOTION_FLIP)",
-                pick == 0 ? "x" : pick == 1 ? "y" : pick == 2 ? "z" : "no axis");
-        k = pick;
+/* The orientation as the Switch 2's fusion has it, from the motion filter's direction matrix. The filter's matrix read
+   the other way round (the world in the Joy-Con's axes) gave the game a mirror image: every turn backwards (the plane's
+   pitch and yaw, the table tennis paddle). So by default the quaternion is the conjugate (the transposed matrix).
+   BUTTERFLY_MOTION_FLIP tries others with no rebuild: "c" or unset the conjugate, "none" the matrix as it is, and an axis
+   letter (x, y, z) adds a half turn about that axis of the Joy-Con, e.g. "cx", "y". */
+static int flip_conj = 1, flip_axis = -1;
+static void device_flip_read(void) {
+    static volatile int done;
+    if (done) return;
+    const char *e = getenv("BUTTERFLY_MOTION_FLIP");
+    if (e && *e) {
+        flip_conj = 0;
+        for (const char *p = e; *p; p++) {
+            const char ch = (char)(*p | 0x20);
+            if (ch == 'c') flip_conj = 1;
+            else if (ch >= 'x' && ch <= 'z') flip_axis = ch - 'x';
+        }
     }
-    return flips[k];
+    hos_log("hid: sensor fusion: the orientation %s%s%s (BUTTERFLY_MOTION_FLIP=%s)", flip_conj ? "conjugated" : "as the filter has it",
+            flip_axis >= 0 ? ", half a turn about " : "", flip_axis == 0 ? "x" : flip_axis == 1 ? "y" : flip_axis == 2 ? "z" : "",
+            e ? e : "unset");
+    done = 1;
 }
 /* the motion's orientation in the fusion's Joy-Con axes (before the yaw reset) */
 static void device_quat(const float *direction, float q[4]) {
+    device_flip_read();
     float raw[4];
     quat_of(direction, raw);
-    quat_mul(raw, device_flip(), q);
+    if (flip_conj) raw[0] = -raw[0], raw[1] = -raw[1], raw[2] = -raw[2];
+    if (flip_axis < 0) { memcpy(q, raw, sizeof raw); return; }
+    float f[4] = {0, 0, 0, 0};
+    f[flip_axis] = 1;
+    quat_mul(raw, f, q);
 }
 /* the orientation handed out: that, turned about the world's up (z) by the yaw reset */
 static void fused(const HosMotionState *m, float q[4]) {
