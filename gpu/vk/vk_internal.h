@@ -152,6 +152,7 @@ void memory_sync();                                   // (at each submit: pools 
 extern std::atomic<int64_t> memsync_lock_wait_ns;     // (longshot, diagnostics: time memory_sync waited for its two locks; the slow-submit line)
 extern std::atomic<int64_t> memsync_part_ns[3];       // (longshot, diagnostics: submit_memory_work's memory_sync, memory_take_capture, memory_collect_written)
 BufferRef gpu_buffer(uint64_t gpu, uint64_t size);   // (empty when no pool holds the range)
+bool gpu_buffer_ready(uint64_t gpu, uint64_t size);   // (butterfly) an import holds the range already (none is made)
 /// A range as a binding of the replay sees it: the pool's VRAM mirror when it has one (vk_memory.cpp), else the
 /// imported pool. written: the GPU may write it (copied back to guest memory at the submission's end).
 BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written);

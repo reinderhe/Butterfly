@@ -2946,6 +2946,18 @@ bool memory_rb_refresh(VkCommandBuffer up) {
     return true;
 }
 
+/// (butterfly) Whether an import already holds [gpu, gpu + size): gpu_buffer would hand it out at no cost, with no import made now
+bool gpu_buffer_ready(uint64_t gpu, uint64_t size) {
+    uint64_t avail = 0;
+    if (!size || !host->gpu_ptr(gpu, &avail) || avail < size) return false;
+    const uint64_t guest = host->gpu_guest(gpu);
+    std::lock_guard lk(pools_mu);
+    auto c = imported.upper_bound(guest);
+    if (c == imported.begin()) return false;
+    --c;
+    return c->second.lo <= guest && c->second.hi >= guest + size;
+}
+
 BufferRef gpu_buffer(uint64_t gpu, uint64_t size) {
     uint64_t avail = 0;
     if (!host->gpu_ptr(gpu, &avail) || avail < size) return {};

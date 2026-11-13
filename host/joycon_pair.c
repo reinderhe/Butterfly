@@ -152,7 +152,8 @@ static void known_forget_unseen(const BLUETOOTH_ADDRESS *seen, int n) {   /* (no
     }
 }
 
-static void pair(HANDLE radio, BLUETOOTH_DEVICE_INFO *info) {
+/* 1: paired; -1: tried and it did not pair; 0: left alone */
+static int pair(HANDLE radio, BLUETOOTH_DEVICE_INFO *info) {
     char name[64];
     name_of(info, name, sizeof name);
     if (info->fRemembered) {
@@ -160,7 +161,7 @@ static void pair(HANDLE radio, BLUETOOTH_DEVICE_INFO *info) {
         if (seen < REPAIR_AFTER) {
             hos_log("hid: pairing: \"%s\" is known to Windows and not connected yet (%d of %d): left to reconnect", name, seen,
                     REPAIR_AFTER);
-            return;
+            return 0;
         }
         /* (Windows can't use a controller that reconnects by itself: start over as with a new one) */
         const DWORD removed = bt.RemoveDevice(&info->Address);
@@ -185,21 +186,25 @@ static void pair(HANDLE radio, BLUETOOTH_DEVICE_INFO *info) {
     if (auth != ERROR_SUCCESS) {
         bt.RemoveDevice(&info->Address);   /* (not in pairing mode after all: no half-made pairing left) */
         hos_log("hid: pairing: \"%s\" didn't pair (result %lu)", name, (unsigned long)auth);
-        return;
+        return -1;
     }
     GUID hid = {0x00001124, 0x0000, 0x1000, {0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB}};   /* (the HID service) */
     const DWORD on = bt.SetServiceState(radio, info, &hid, BLUETOOTH_SERVICE_ENABLE);
     bt.GetDeviceInfo(radio, info);
     hos_log("hid: pairing: \"%s\" paired (HID service %lu, bonded %d): it connects in a moment", name, (unsigned long)on,
             info->fAuthenticated != 0);
+    return 1;
 }
 
-/* one inquiry (about 2.6 s): each Switch controller that answered it and is not connected, paired */
-static void pair_discoverable(void) {
+/* one inquiry (about 2.6 s): each Switch controller that answered it and is not connected, paired. Returns whether one was
+   paired or tried. (butterfly) The inquiry's list is read to the end and closed first, then they are paired one after the
+   other: paired while the list was still open, the first one (the right Joy-Con, both times) never answered (258) */
+static int pair_discoverable(void) {
+    int any = 0;
     BLUETOOTH_FIND_RADIO_PARAMS rp = {sizeof rp};
     HANDLE radio = NULL;
     HBLUETOOTH_RADIO_FIND rf = bt.FindFirstRadio(&rp, &radio);
-    if (!rf) return;
+    if (!rf) return 0;
     do {
         BLUETOOTH_DEVICE_SEARCH_PARAMS search;
         memset(&search, 0, sizeof search);
@@ -216,24 +221,31 @@ static void pair_discoverable(void) {
         BLUETOOTH_DEVICE_INFO info;
         memset(&info, 0, sizeof info);
         info.dwSize = sizeof info;
-        HBLUETOOTH_DEVICE_FIND df = bt.FindFirstDevice(&search, &info);
+        BLUETOOTH_DEVICE_INFO found[8];
+        int nfound = 0;
         BLUETOOTH_ADDRESS seen[8];
         int nseen = 0;
+        HBLUETOOTH_DEVICE_FIND df = bt.FindFirstDevice(&search, &info);
         if (df) {
             do {
-                if (is_switch_controller(&info) && !info.fConnected && seen_since(&info, &start)) {
+                if (is_switch_controller(&info) && !info.fConnected && seen_since(&info, &start) && nfound < 8) {
                     if (info.fRemembered && nseen < 8) seen[nseen++] = info.Address;
-                    pair(radio, &info);
+                    found[nfound++] = info;
                 }
                 memset(&info, 0, sizeof info);
                 info.dwSize = sizeof info;
             } while (bt.FindNextDevice(df, &info));
             bt.FindDeviceClose(df);
         }
+        for (int i = 0; i < nfound; i++) {
+            if (i) Sleep(1000);
+            any |= pair(radio, &found[i]) != 0;
+        }
         known_forget_unseen(seen, nseen);
         CloseHandle(radio);
     } while (bt.FindNextRadio(rf, &radio));
     bt.FindRadioClose(rf);
+    return any;
 }
 
 void hos_sdl_switch_pads(int *left, int *right, int *pro);   /* pad_sdl.c */
@@ -249,7 +261,20 @@ static DWORD WINAPI pair_main(LPVOID unused) {
            drop meant more inquiries, every 5 s: a game where neither Joy-Con kept its connection. A bonded Joy-Con that
            drops comes back by itself; a second one in pairing mode waits until none is connected, or for Windows' own
            Bluetooth settings) */
-        if (!pro && !left && !right) pair_discoverable();
+        /* (butterfly) and for a minute after a pairing or a try (8 inquiries), while only one Joy-Con of a pair is there: the
+           other one is still in pairing mode then. The right Joy-Con's try failed, the left one paired, and with the left one
+           connected no inquiry was made again: the right one was left to Windows' settings every time. The minute is short
+           enough for the lag of the inquiries not to matter */
+        static int extra;
+        const int one_of_pair = !pro && (left != 0) != (right != 0);
+        if (!pro && !left && !right) {
+            if (pair_discoverable()) extra = 8;
+        } else if (extra > 0 && one_of_pair) {
+            extra--;
+            if (pair_discoverable()) extra = extra > 4 ? extra : 4;
+        } else {
+            extra = 0;
+        }
         Sleep(5000);
     }
     return 0;

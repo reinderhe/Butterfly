@@ -1201,6 +1201,10 @@ bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     default: return false;
     }
     if (!unswizzle_ready()) return false;
+    // (a BC texture whose storage no import holds yet stays on the CPU unless it is big: the import (17-110 ms in the driver, the
+    // range's 4 MB chunks locked) cost more than the CPU's unswizzle of a 1-2 MB texture, ~1 ms, and the first build with this
+    // made each scene change's dozens of small normal maps an import each)
+    if (block && total < (16u << 20) && !gpu_buffer_ready(tex.gpu, total)) return false;
     const BufferRef src = gpu_buffer(tex.gpu, total);
     const uint64_t align = std::max<uint64_t>(dev.props.limits.minStorageBufferOffsetAlignment, 16);
     if (!src || (src.offset % align)) return false;
