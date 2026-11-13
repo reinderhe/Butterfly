@@ -78,6 +78,50 @@ HLE(_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE) {
 HLE(_ZN2nn3hid25GetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleE) { RET(1); }
 HLE(_ZN2nn3hid25SetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleERKNS0_22GyroscopeZeroDriftModeE) {}
 
+/* ---- the Joy-Cons' colours (butterfly) ---------------------------------------------------------------------------------
+   NpadJoyIconDecorationColor, 12 bytes: three RGBA colours (the game reads bytes 0-2, 4-6 and 8-10 of each: 0x803c4dc0),
+   body, buttons and the third. Unanswered, the game drew what its stack held: the left Joy-Con's icon in a mix of colours,
+   flashing as they changed. A Joy-Con keeps its colours in its own memory, which SDL does not read out, so they come from
+   HOS_JOYCON_COLOR_LEFT / HOS_JOYCON_COLOR_RIGHT (the environment or longshot_env.txt): "RRGGBB" the body, "RRGGBB,RRGGBB"
+   the body and the buttons; else the grey Joy-Con's (body 828282, buttons 0F0F0F) */
+static void joycon_colors(int right, uint8_t out[12]) {
+    uint32_t body = 0x828282, buttons = 0x0F0F0F;
+    const char *e = getenv(right ? "HOS_JOYCON_COLOR_RIGHT" : "HOS_JOYCON_COLOR_LEFT");
+    if (e && *e) {
+        char *end = NULL;
+        const unsigned long b = strtoul(e[0] == '#' ? e + 1 : e, &end, 16);
+        if (end && end != e) body = (uint32_t)b & 0xFFFFFF;
+        if (end && *end == ',') {
+            const char *t = end + 1;
+            const unsigned long k = strtoul(t[0] == '#' ? t + 1 : t, &end, 16);
+            if (end != t) buttons = (uint32_t)k & 0xFFFFFF;
+        }
+    }
+    const uint32_t c[3] = {body, buttons, body};
+    for (int i = 0; i < 3; i++) {
+        out[4 * i] = (uint8_t)(c[i] >> 16), out[4 * i + 1] = (uint8_t)(c[i] >> 8), out[4 * i + 2] = (uint8_t)c[i];
+        out[4 * i + 3] = 0xFF;
+    }
+}
+static void put_colors(uint64_t at, int right) {
+    if (!hos_guest_range(at, 12)) return;
+    uint8_t b[12];
+    joycon_colors(right, b);
+    memcpy(GP(at), b, sizeof b);
+    HOS_WRITTEN(GP(at), sizeof b);
+}
+/* GetNpadJoyIconDecorationColor(Color* left, Color* right, unsigned int const& npad): a pair's */
+HLE(_ZN2nn3hid29GetNpadJoyIconDecorationColorEPNS0_26NpadJoyIconDecorationColorES2_RKj) {
+    put_colors(ARG(0), 0);
+    put_colors(ARG(1), 1);
+    RET(0);
+}
+/* GetNpadJoyIconDecorationColor(Color*, unsigned int const& npad): one controller's (a lone left Joy-Con the left's) */
+HLE(_ZN2nn3hid29GetNpadJoyIconDecorationColorEPNS0_26NpadJoyIconDecorationColorERKj) {
+    put_colors(ARG(0), hos_npad_style() == STYLE_JOYLEFT ? 0 : 1);
+    RET(0);
+}
+
 /* ---- sensor fusion ---------------------------------------------------------------------------------------------- */
 #define FUSION_HANDLE 0x5346u   /* ("SF") */
 #define ENTRY 0x50
