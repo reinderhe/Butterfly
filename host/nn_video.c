@@ -135,6 +135,7 @@ typedef struct {
     int qhead, qn;
     int eos;                         /* the last submission is in and decoded: an empty queue is the end */
     int stopped;                     /* (longshot) Stop or Flush since the last submission: no picture is coming (dec_acquire) */
+    DWORD submit_tid;                /* (butterfly) the thread of the last submission (dec_acquire) */
     Pending *phead, *ptail;          /* submissions not decoded yet, oldest first */
     int64_t submits, acquires;
     int clock_set;                   /* (longshot) the movie's clock: the picture at clock_pts was due at clock_ns */
@@ -672,6 +673,7 @@ static void dec_submit(Ctx *c) {
     if (ARG(0)) G64(ARG(0)) = id;
     if (!d || (!d->ctx && !d->mf)) { RET(0); return; }
     AcquireSRWLockExclusive(&d->lock);
+    d->submit_tid = GetCurrentThreadId();
     /* (longshot) the size is 64-bit: one past what an AVPacket holds was cut to a small packet and copied in whole; and
        the data must lie in guest memory */
     const void *data = ARG(2) && ARG(3) && ARG(3) <= INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE ? hos_guest_range(ARG(2), ARG(3)) : NULL;
@@ -754,8 +756,13 @@ static void dec_acquire(Ctx *c) {
        nothing submitted since: no picture is coming then. HOS_VIDEO_ACQUIRE_TRIES=1: 50 tries, as before */
     static int by_tries = -1;
     if (by_tries < 0) by_tries = env_on("HOS_VIDEO_ACQUIRE_TRIES");
+    /* (butterfly) Not when this thread is the one that submits and nothing is left to decode: no other thread brings a picture
+       then, and the wait only held the thread that would submit the next one. Sports Resort's intro (2560x1440 at 60 fps,
+       read, submitted and taken on one thread) waited 100 ms at most acquires: about 10 a second, 1100 of its 1323 pictures
+       skipped, a slide show that took the intro from some 25 s to more than a minute */
+    const int own = !d->phead && d->submit_tid == GetCurrentThreadId();
     const int64_t wait_until = hos_now_ns() + 100000000;
-    for (int tries = 0; !d->qn && !d->eos && (by_tries ? tries < 50 : !d->stopped && hos_now_ns() < wait_until); tries++) {
+    for (int tries = 0; !own && !d->qn && !d->eos && (by_tries ? tries < 50 : !d->stopped && hos_now_ns() < wait_until); tries++) {
         ReleaseSRWLockExclusive(&d->lock);
         hos_sleep_ns(2000000);
         AcquireSRWLockExclusive(&d->lock);
