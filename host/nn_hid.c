@@ -945,15 +945,21 @@ HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj) { npad_states(c); }
 HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj) { npad_states(c); }
 HLE(_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj) { npad_states(c); }
 /* GetNpadStyleSet(unsigned int const&) -> BitFlagSet<32, NpadStyleTag> */
-HLE(_ZN2nn3hid15GetNpadStyleSetERKj) { RET(G32(ARG(0)) == NPAD_NO1 ? STYLE_FULLKEY : 0); }
+/* (butterfly) the style the game asks for (ssr_hid.c): a full key controller unless it takes only Joy-Cons */
+uint32_t hos_npad_style(void);
+void hos_npad_set_supported(uint32_t styles);
+HLE(_ZN2nn3hid15GetNpadStyleSetERKj) { RET(G32(ARG(0)) == NPAD_NO1 ? hos_npad_style() : 0); }
 
 HLE(_ZN2nn3hid14InitializeNpadEv) {}
 HLE(_ZN2nn3hid18InitializeKeyboardEv) {}
 HLE(_ZN2nn3hid15InitializeMouseEv) {}
 HLE(_ZN2nn3hid14DisconnectNpadERKj) {}
-HLE(_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE) {}
+HLE(_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE) {
+    static int64_t last = -1;
+    if ((int64_t)ARG(0) != last) last = (int64_t)ARG(0), hos_log("hid: Joy-Con hold type %d (0 upright, 1 sideways)", (int)last);
+}
 HLE(_ZN2nn3hid22SetSupportedNpadIdTypeEPKjm) {}
-HLE(_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {}
+HLE(_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) { hos_npad_set_supported((uint32_t)ARG(0)); }
 HLE(_ZN2nn3hid18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE) {}
 
 /* ShowControllerSupport(ControllerSupportResultInfo*, ControllerSupportArg const&) -> Result: one player, No.1 */

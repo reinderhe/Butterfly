@@ -1,0 +1,215 @@
+/* (butterfly) The controller calls Nintendo Switch Sports Resort makes beyond Ocarina of Time's: Joy-Cons held one at a time
+   (the styles it supports, single and dual assignment), and the Switch 2's sensor fusion, the orientation its sports read
+   the Joy-Con's swing from. The SDK's versions of these are thin calls into the system, so the lift stubs them out (0):
+   the sports' setup took IsSensorFusionEnabled's 0 for a failure and waited forever.
+
+   The orientation is host/pad_sdl.c's motion (Eden's filter on the gyroscope and accelerometer of the pad with motion used
+   last: a Joy-Con through SDL), as GetSixAxisSensorStates hands it out, turned into the SensorFusionOrientation the game reads
+   (laid out from its own use of them, 0x8015a254..: 0x50 bytes, newest first):
+     +0x00 i64 sampling number   +0x08 i64 (kept the same while enabled)   +0x10 i64 the time since the one before (ns)
+     +0x18 AccelerationType (read with GetG: here three floats, in G)
+     +0x24 AngularVelocityType (read with GetDps: here three floats, in degrees a second)
+     +0x30 the orientation as a quaternion x, y, z, w      +0x40 u8 status (2 bits)
+   GetRotationMatrix gives the quaternion back as the 3x3 matrix (rows), the six-axis state's direction. */
+#include "hos.h"
+#include "hos_motion.h"
+#include <windows.h>
+#include <math.h>
+#include <string.h>
+
+#define NPAD_NO1 0
+#define STYLE_FULLKEY (1u << 0)
+#define STYLE_HANDHELD (1u << 1)
+#define STYLE_JOYDUAL (1u << 2)
+#define STYLE_JOYLEFT (1u << 3)
+#define STYLE_JOYRIGHT (1u << 4)
+
+/* ---- the npad: its styles and its Joy-Cons' assignment ----------------------------------------------------------- */
+static volatile uint32_t supported_styles;   /* SetSupportedNpadStyleSet's (0: not set) */
+static volatile int single_assigned;         /* No.1 set to single (one Joy-Con) */
+
+/* The style No.1 shows (nn_hid.c's GetNpadStyleSet): a full key controller while the game takes one, as Ocarina of Time
+   does; else a right Joy-Con alone once the game set No.1 to single, or a Joy-Con pair */
+uint32_t hos_npad_style(void) {
+    const uint32_t s = supported_styles;
+    if (!s || (s & STYLE_FULLKEY && !single_assigned)) return STYLE_FULLKEY;
+    if (single_assigned && (s & STYLE_JOYRIGHT)) return STYLE_JOYRIGHT;
+    if (s & STYLE_JOYDUAL) return STYLE_JOYDUAL;
+    if (s & STYLE_JOYRIGHT) return STYLE_JOYRIGHT;
+    if (s & STYLE_FULLKEY) return STYLE_FULLKEY;
+    return s & (0u - s);   /* (the lowest the game takes) */
+}
+void hos_npad_set_supported(uint32_t styles) {
+    if (styles != supported_styles)
+        hos_log("hid: the game takes npad styles %#x: No.1 shows %#x", styles, (supported_styles = styles, hos_npad_style()));
+}
+uint32_t hos_npad_supported(void) { return supported_styles; }
+
+HLE(_ZN2nn3hid24GetSupportedNpadStyleSetEv) { RET(supported_styles); }
+/* GetNpadJoyAssignment(unsigned int const&) -> NpadJoyAssignmentMode: 0 dual, 1 single */
+HLE(_ZN2nn3hid20GetNpadJoyAssignmentERKj) { RET(G32(ARG(0)) == NPAD_NO1 && single_assigned ? 1 : 0); }
+static void set_single(uint32_t id, int single) {
+    if (id != NPAD_NO1 || single_assigned == single) return;
+    single_assigned = single;
+    hos_log("hid: No.1 set to %s: it shows style %#x", single ? "single (one Joy-Con)" : "dual (a pair)", hos_npad_style());
+}
+HLE(_ZN2nn3hid30SetNpadJoyAssignmentModeSingleERKj) { set_single(G32(ARG(0)), 1); }
+HLE(_ZN2nn3hid30SetNpadJoyAssignmentModeSingleERKjNS0_17NpadJoyDeviceTypeE) { set_single(G32(ARG(0)), 1); }
+HLE(_ZN2nn3hid28SetNpadJoyAssignmentModeDualERKj) { set_single(G32(ARG(0)), 0); }
+HLE(_ZN2nn3hid18SwapNpadAssignmentERKjS2_) { RET(0); }
+HLE(_ZN2nn3hid23MergeSingleJoyAsDualJoyERKjS2_) { RET(0); }
+
+/* ---- six-axis extras ------------------------------------------------------------------------------------------- */
+/* IsSixAxisSensorAtRest(handle) -> bool: never (a held Joy-Con) */
+HLE(_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE) { RET(0); }
+/* GetGyroscopeZeroDriftMode(handle) -> GyroscopeZeroDriftMode: 1 standard (what the motion filter does) */
+HLE(_ZN2nn3hid25GetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleE) { RET(1); }
+HLE(_ZN2nn3hid25SetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleERKNS0_22GyroscopeZeroDriftModeE) {}
+
+/* ---- sensor fusion ---------------------------------------------------------------------------------------------- */
+#define FUSION_HANDLE 0x5346u   /* ("SF") */
+#define ENTRY 0x50
+static volatile int fusion_enabled;
+static float yaw_fix[4] = {0, 0, 0, 1};   /* applied on the world's side (ResetSensorFusionYaw) */
+static SRWLOCK fusion_lock = SRWLOCK_INIT;
+static int64_t fusion_base, fusion_last;
+static int fusion_was_live;
+
+HLE(_ZN2nn3hid25GetSensorFusionMemorySizeEv) { RET(0x1000); }
+HLE(_ZN2nn3hid29GetSensorFusionWorkBufferSizeEv) { RET(0x1000); }
+HLE(_ZN2nn3hid22InitializeSensorFusionEPvm) { RET(0); }
+HLE(_ZN2nn3hid20FinalizeSensorFusionEv) { fusion_enabled = 0; }
+/* GetSensorFusionHandles(SensorFusionHandle*, int, unsigned int const& npad, BitFlagSet styles) -> int: one, No.1's */
+HLE(_ZN2nn3hid22GetSensorFusionHandlesEPNS0_18SensorFusionHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {
+    if ((int)ARG(1) < 1 || G32(ARG(2)) != NPAD_NO1) { RET(0); return; }
+    G32(ARG(0)) = FUSION_HANDLE;
+    RET(1);
+}
+HLE(_ZN2nn3hid18EnableSensorFusionENS0_18SensorFusionHandleEPvm) {
+    if (!fusion_enabled) hos_log("hid: sensor fusion on (the orientation from the motion controls)");
+    fusion_enabled = 1;
+    RET(0);
+}
+HLE(_ZN2nn3hid19DisableSensorFusionENS0_18SensorFusionHandleE) { fusion_enabled = 0; RET(0); }
+HLE(_ZN2nn3hid21IsSensorFusionEnabledENS0_18SensorFusionHandleE) { RET(fusion_enabled ? 1 : 0); }
+HLE(_ZN2nn3hid18UpdateSensorFusionENS0_18SensorFusionHandleE) { RET(0); }
+
+/* the quaternion (x, y, z, w) of a rotation matrix (rows), and back */
+static void quat_of(const float *m, float q[4]) {
+    const float tr = m[0] + m[4] + m[8];
+    if (tr > 0) {
+        const float s = sqrtf(tr + 1.0f) * 2;
+        q[3] = 0.25f * s, q[0] = (m[7] - m[5]) / s, q[1] = (m[2] - m[6]) / s, q[2] = (m[3] - m[1]) / s;
+    } else if (m[0] > m[4] && m[0] > m[8]) {
+        const float s = sqrtf(1.0f + m[0] - m[4] - m[8]) * 2;
+        q[3] = (m[7] - m[5]) / s, q[0] = 0.25f * s, q[1] = (m[1] + m[3]) / s, q[2] = (m[2] + m[6]) / s;
+    } else if (m[4] > m[8]) {
+        const float s = sqrtf(1.0f + m[4] - m[0] - m[8]) * 2;
+        q[3] = (m[2] - m[6]) / s, q[0] = (m[1] + m[3]) / s, q[1] = 0.25f * s, q[2] = (m[5] + m[7]) / s;
+    } else {
+        const float s = sqrtf(1.0f + m[8] - m[0] - m[4]) * 2;
+        q[3] = (m[3] - m[1]) / s, q[0] = (m[2] + m[6]) / s, q[1] = (m[5] + m[7]) / s, q[2] = 0.25f * s;
+    }
+    const float n = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (n > 0) for (int i = 0; i < 4; i++) q[i] /= n;
+    else q[0] = q[1] = q[2] = 0, q[3] = 1;
+}
+static void matrix_of(const float q[4], float *m) {
+    const float x = q[0], y = q[1], z = q[2], w = q[3];
+    m[0] = 1 - 2 * (y * y + z * z), m[1] = 2 * (x * y - z * w), m[2] = 2 * (x * z + y * w);
+    m[3] = 2 * (x * y + z * w), m[4] = 1 - 2 * (x * x + z * z), m[5] = 2 * (y * z - x * w);
+    m[6] = 2 * (x * z - y * w), m[7] = 2 * (y * z + x * w), m[8] = 1 - 2 * (x * x + y * y);
+}
+static void quat_mul(const float a[4], const float b[4], float o[4]) {
+    o[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+    o[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+    o[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+    o[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+}
+/* the orientation handed out: the motion's, turned about the world's up (z) by the yaw reset */
+static void fused(const HosMotionState *m, float q[4]) {
+    float raw[4];
+    quat_of(m->direction, raw);
+    AcquireSRWLockShared(&fusion_lock);
+    quat_mul(yaw_fix, raw, q);
+    ReleaseSRWLockShared(&fusion_lock);
+}
+/* ResetSensorFusionYaw(handle): the way the Joy-Con points now is straight ahead */
+HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
+    int hos_sdl_motion_history(HosMotionSample *out, int max);   /* pad_sdl.c */
+    HosMotionSample h[1];
+    if (hos_sdl_motion_history(h, 1) == 1) {
+        const float *m = h[0].st.direction;
+        const float yaw = atan2f(m[3], m[0]);   /* (the Joy-Con's x axis in the world: column 0) */
+        AcquireSRWLockExclusive(&fusion_lock);
+        yaw_fix[0] = yaw_fix[1] = 0, yaw_fix[2] = sinf(-yaw / 2), yaw_fix[3] = cosf(-yaw / 2);
+        ReleaseSRWLockExclusive(&fusion_lock);
+    }
+    RET(0);
+}
+/* GetSensorFusionOrientations(SensorFusionOrientation* out, int max, SensorFusionHandle) -> int: newest first */
+HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_18SensorFusionHandleE) {
+    const uint64_t out = ARG(0);
+    const int max = (int)ARG(1) < 1 ? 0 : (int)ARG(1) > HOS_MOTION_HISTORY ? HOS_MOTION_HISTORY : (int)ARG(1);
+    if (!max || !hos_guest_range(out, (uint64_t)max * ENTRY)) { RET(0); return; }
+    int hos_sdl_motion_history(HosMotionSample *out, int max);   /* pad_sdl.c */
+    HosMotionSample h[HOS_MOTION_HISTORY];
+    const int live = hos_sdl_motion_history(h, max);
+    /* (sampling numbers as GetSixAxisSensorStates hands them out: always on, a whole history apart between live and rest) */
+    if (live) {
+        if (!fusion_was_live || fusion_base + h[0].n < fusion_last) fusion_base = fusion_last + HOS_MOTION_HISTORY - h[0].n;
+        fusion_last = fusion_base + h[0].n;
+    } else {
+        fusion_last += fusion_was_live ? HOS_MOTION_HISTORY : 1;
+    }
+    fusion_was_live = live > 0;
+    static const HosMotionState at_rest = {{0, 0, -1}, {0, 0, 0}, {0, 0, 0}, {1, 0, 0, 0, 1, 0, 0, 0, 1}};
+    const int n = live ? live : 1;
+    for (int i = 0; i < n; i++) {
+        const uint64_t e = out + (uint64_t)i * ENTRY;
+        const HosMotionState *m = live ? &h[i].st : &at_rest;
+        float q[4], dps[3];
+        fused(m, q);
+        for (int k = 0; k < 3; k++) dps[k] = m->gyro[k] * 360.0f;
+        memset(GP(e), 0, ENTRY);
+        G64(e) = (uint64_t)(live ? fusion_base + h[i].n : fusion_last - i);
+        G64(e + 8) = 1;
+        G64(e + 0x10) = (uint64_t)(live && h[i].dt_ns > 0 ? h[i].dt_ns : 5000000);
+        memcpy(GP(e + 0x18), m->accel, 12);
+        memcpy(GP(e + 0x24), dps, 12);
+        memcpy(GP(e + 0x30), q, 16);
+    }
+    HOS_WRITTEN(GP(out), (size_t)n * ENTRY);
+    static int logged;
+    if (!logged++) hos_log("hid: sensor fusion: first orientations (%s)", live ? "a pad with motion" : "no pad with motion: at rest");
+    RET(n);
+}
+/* the three float returns of GetG / GetDps (s0, s1, s2) */
+static void ret_floats3(Ctx *c, const float *f) {
+    for (int i = 0; i < 3; i++) {
+        uint32_t bits;
+        memcpy(&bits, &f[i], 4);
+        c->vreg[i][0] = bits, c->vreg[i][1] = 0;
+    }
+}
+/* AccelerationType::GetG() const -> {x, y, z} G; AngularVelocityType::GetDps() const -> degrees a second */
+HLE(_ZNK2nn3hid16AccelerationType4GetGEv) {
+    float f[3] = {0, 0, 0};
+    if (hos_guest_range(ARG(0), 12)) memcpy(f, GP(ARG(0)), 12);
+    ret_floats3(c, f);
+}
+HLE(_ZNK2nn3hid19AngularVelocityType6GetDpsEv) {
+    float f[3] = {0, 0, 0};
+    if (hos_guest_range(ARG(0), 12)) memcpy(f, GP(ARG(0)), 12);
+    ret_floats3(c, f);
+}
+/* SensorFusionOrientation::GetRotationMatrix() const -> a 3x3 matrix, by the result pointer (x8) */
+HLE(_ZNK2nn3hid23SensorFusionOrientation17GetRotationMatrixEv) {
+    float q[4] = {0, 0, 0, 1}, m[9];
+    if (hos_guest_range(ARG(0) + 0x30, 16)) memcpy(q, GP(ARG(0) + 0x30), 16);
+    matrix_of(q, m);
+    if (hos_guest_range(c->x[8], sizeof m)) {
+        memcpy(GP(c->x[8]), m, sizeof m);
+        HOS_WRITTEN(GP(c->x[8]), sizeof m);
+    }
+}
