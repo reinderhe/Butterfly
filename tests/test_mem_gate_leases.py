@@ -33,7 +33,7 @@ class CompileGateTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        self.stack.enter_context(mock.patch.dict(os.environ, {"HOOKSHOT_MEM_RESERVE_GB": "1.5", "HOOKSHOT_MEM_LIMIT_GB": ""}))
+        self.stack.enter_context(mock.patch.dict(os.environ, {"LONGSHOT_MEM_RESERVE_GB": "1.5", "LONGSHOT_MEM_LIMIT_GB": ""}))
         self.folder = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix="mem-gate-leases-")))
         self.scope = actual_build(SOURCE)
         self.gate = self.scope["MemoryGate"]()

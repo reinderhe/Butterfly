@@ -27,7 +27,7 @@ FIXTURE = r"""
 
 using DWORD = unsigned long;
 constexpr int MAX_PATH = 260;
-static DWORD hos_game_path_a(char *path, DWORD size) { return snprintf(path, size, "./hookshot.exe"); }
+static DWORD hos_game_path_a(char *path, DWORD size) { return snprintf(path, size, "./longshot.exe"); }
 static char logged[256];
 static void hos_log(const char *format, ...) {
     va_list args;
@@ -41,7 +41,7 @@ static int device_channels, device_asked;
 static int au_device_channels(void) { device_asked++; return device_channels; }
 HOST
 struct Row { int tab; const char* name; int* value; };
-struct { int output_res, resolution, fps_cap, upscale, dlss, handheld, mesh_mode, audio_output; } opts;
+struct { int output_res, vsync, resolution, fps_cap, upscale, dlss, handheld, ultrawide, audio_output; } opts;   // (ultrawide: the Aspect ratio row's key)
 MENU
 int main(int argc, char **argv) {
     assert(argc == 7);
@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
     for (int v = 0; v <= 2; v++) assert(hn_audio_output(v, -1) && hn_audio_output(v, 0) && !hn_audio_output(v, 1));
     if (strcmp(saved, "-")) {   /* (the lines as the menu's save writes them: the row's key, around others) */
         const Row row = {1, argv[1], &opts.audio_output};
-        FILE *f = fopen("hookshot_options.ini", "w");
+        FILE *f = fopen("longshot_options.ini", "w");
         assert(f);
         fprintf(f, "output_res=1\n%s=%s\nmicrophone=1\noptions_version=3\n", ini_key(row), saved);
         fclose(f);
@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
 }
 """
 
-# (saved audio_output or "-" for no hookshot_options.ini, HOS_AUDIO_CHANNELS or None, the default output's channels,
+# (saved audio_output or "-" for no longshot_options.ini, HOS_AUDIO_CHANNELS or None, the default output's channels,
 #  the speakers the game is told, whether the device was asked, what the log says)
 CASES = (
     ("-", None, 6, 6, 1, "the default output has 6 channels"),
@@ -106,19 +106,19 @@ def main():
     tab, name, lo, hi, step, text, hint, restart, exempt = row.groups()
     assert (tab, lo, hi, step, text, hint, restart, exempt) == \
         ("AUDIO", "0", "2", "1", "tx_audio_output", "hn_audio_output", "true", "true"), row.groups()
-    host = between(audio, "/* (hookshot) The Insert menu's Audio output", "/* The device's format,")
+    host = between(audio, "/* (longshot) The Insert menu's Audio output", "/* The device's format,")
     hints = re.search(r'MENU_HINTS\(hn_audio_output,.*?\)\n(?=\S)', menu, re.S)
     assert hints, "no MENU_HINTS(hn_audio_output, ...)"
     menu_part = between(menu, "/// A row's hints from a table", "const char* tx_framegen(") + hints.group(0) + \
         between(menu, "const char* tx_audio_output(int v) {", "const char* tx_robust(") + \
-        between(menu, "const char* ini_key(const Row& r) {", "// (hookshot) the controls, kept by the host")
+        between(menu, "const char* ini_key(const Row& r) {", "// (longshot) the controls, kept by the host")
     with tempfile.TemporaryDirectory(prefix="audio-output-menu-") as tmp:
         work = Path(tmp)
         source, exe = work / "fixture.cpp", work / "fixture.exe"
         source.write_text(FIXTURE.replace("HOST", host).replace("MENU", menu_part), encoding="utf-8")
         subprocess.run([args.cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(exe)], check=True)
         for saved, env_channels, device, want, asked, log in CASES:
-            ini = work / "hookshot_options.ini"
+            ini = work / "longshot_options.ini"
             if ini.exists():
                 ini.unlink()
             env = os.environ.copy()

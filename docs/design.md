@@ -1,4 +1,4 @@
-# Hookshot (oot-recomp): design
+# Longshot (oot-recomp): design
 
 A native x86-64 Windows and Linux build of the Switch 2 *The Legend of Zelda: Ocarina of Time* remake: the game's AArch64
 code translated to C ahead of time from the user's own decrypted dump and compiled with clang, the Horizon OS and
@@ -66,8 +66,8 @@ message. OoT-specific code goes into new files where it can, so the shared files
  one C function per guest function (work/sa/gen, ~1 GB, local), 64-bit guest window (nx2/rtgen.py)
         │  clang (llvm-mingw, emsdk or the system's) -O1, the hot functions -O2 with the play profile, lld (nx2/build.py --standalone)
         ▼
- hookshot.exe = lifted game + host/ (Horizon: threads, SVCs, memory, fs, hid, audio, vi, gs, NVN2)
- hookshot_vk.dll = the Vulkan back end (gpu/vk), loaded by host/rx_backend.c unless RX_BACKEND names another renderer
+ longshot.exe = lifted game + host/ (Horizon: threads, SVCs, memory, fs, hid, audio, vi, gs, NVN2)
+ longshot_vk.dll = the Vulkan back end (gpu/vk), loaded by host/rx_backend.c unless RX_BACKEND names another renderer
 ```
 
 - **Standalone from the start.** MKW went emulator-hosted first (Eglantine with a recompiled CPU backend), then
@@ -83,6 +83,17 @@ message. OoT-specific code goes into new files where it can, so the shared files
   `gpu/vk` replays it on Vulkan 1.3: pools imported as host memory, SM86 programs through Eden's recompiler to
   SPIR-V, mesh/task programs with `VK_EXT_mesh_shader`. The WebGPU renderer (`gpu/render`) stays in the Windows exe as the
   fallback when Vulkan is missing, as in mkw-recomp, when the build has wgpu-native (`WGPU_NATIVE`).
+
+### Graphics pipeline state
+
+The mesh compute fallback draws its generated records through a vertex shader without vertex buffers.
+Its graphics pipelines keep dynamic primitive topology and primitive restart, but do not require a
+dynamic vertex binding stride (#2494, tracked in #1001). Ordinary vertex-input pipelines still use
+dynamic stride; native mesh pipelines do not use these three input-assembly/vertex-input states.
+Binding the fallback's static-stride pipeline invalidates dynamic strides. The draw path drops both
+vertex-bind skip caches at that bind, so the next ordinary draw sets its strides again even if the
+buffers are unchanged. Resolved buffer references remain cached; buffer handles, offsets and sizes
+are not invalidated by pipeline binding. Runtime fallback programs do not use pipeline libraries.
 
 ## 4. The lessons from MKW, as rules here
 
@@ -132,7 +143,7 @@ id (`hos_game_is_mkw`); OoT gets its own once its pacer is found, never by addre
 |---|---|---|
 | **S0** | the dump located and characterized (`nx2/dump.py --set`) | the six signals agree; program id, build ids, module sizes, SDK and NVN versions, romfs size recorded in section 9 |
 | **S1** | loader + RELR, image in Eden's layout, discovery, coverage, census; instruction test (every form the game uses) and function tests (self-contained and call trees) against Unicorn | 100 % of discovered instructions translated (UDF aside), no BR without a jump table, every form bit-exact, every comparable function case identical |
-| **S2** | the standalone lift (`lift.py --standalone --write`) and a full build (`build.py --standalone`): hookshot.exe and hookshot_vk.dll link | the boot runs `_init_libc*`, `nnosInitialize`, `nninitStartup`, the modules' DT_INIT, `nnMain` and reaches `nvnBootstrapLoader` |
+| **S2** | the standalone lift (`lift.py --standalone --write`) and a full build (`build.py --standalone`): longshot.exe and longshot_vk.dll link | the boot runs `_init_libc*`, `nnosInitialize`, `nninitStartup`, the modules' DT_INIT, `nnMain` and reaches `nvnBootstrapLoader` |
 | **S3** | NVN2 for this game: the procs it asks for, device limits, its window; the Vulkan replay | **the first frame**: a `run-vk.ps1` screenshot shows what the game draws first (a logo or loading screen) |
 | **S4** | title screen and menus: romfs, save data, hid, audio (muted in tests), movies, the stubs it hits | the title screen and the file select are reachable by scripted input (`HOS_INPUT_SCRIPT` / `HOS_INPUT_LIVE`) |
 | **S5** | gameplay: correctness (the flash detector `RX_VK_FLASH=1`, frame dumps) and speed (the profiler) | Kokiri Forest plays without flashes at the game's own frame rate |
@@ -145,7 +156,7 @@ id (`hos_game_is_mkw`); OoT gets its own once its pacer is found, never by addre
 - **Whole functions** (`nx2/test_leaf.py`, `--calls` for call trees): random functions of every module on the real
   relocated image, natively and in Unicorn, on the 64-bit window with polls firing; registers, V registers and
   every changed page compared.
-- **The production build** (`nx2/test_dll.py`, when a `hookshot_game.dll` is built).
+- **The production build** (`nx2/test_dll.py`, when a `longshot_game.dll` is built).
 - **In the game**: `scripts/run-vk.ps1` screenshots, the flash detector, frame dumps (`RX_VK_DUMP*`), the sampled
   profiler (`HOS_SAMPLE` + `scripts/prof.py`), and Eglantine as the A/B reference for what a frame should look like.
 
@@ -157,7 +168,7 @@ id (`hos_game_is_mkw`); OoT gets its own once its pacer is found, never by addre
 - `..\Eglantine` is read and run, never modified; mkw-recomp and the other ports are read and copied from, never
   edited.
 - One game run at a time on this PC (mkw-recomp's runs take ~10 GB): `run-vk.ps1` refuses while `mkw.exe` or
-  another `hookshot.exe` runs, and while Rainbow Six Siege is open; no heavy builds while Siege is open either. Runs are
+  another `longshot.exe` runs, and while Rainbow Six Siege is open; no heavy builds while Siege is open either. Runs are
   muted (`HOS_AUDIO=0`), at the priority `-Priority` gives (High by default), and screenshot folders are deleted once looked at.
 - The lifted C and every build are GPL (suyu's translator is GPL-2.0-or-later; Eden's code is GPL-3.0).
 
@@ -183,7 +194,9 @@ dump, the runtime made game-neutral, the stage-1 tools checked on MKW's dump as 
   tables, no BR without one. Instruction test: 742 forms, 44,172 cases, all pass.
 - **S2:** the standalone lift: 294,450 functions in 57 chunks (1.4 GB of C), 485 HLE functions, 243 OS imports
   stubbed, 22 sdk NVN functions routed to `host/nvn2.c`.
-  The build links (`hookshot.exe`, 426 MB; ~25 min for a full build with 4 jobs, a few minutes after a relift).
+  The build links (`longshot.exe`, 426 MB; ~25 min for a full build with 4 jobs, a few minutes after a relift).
+  On 2026-11-13 a player's build of nightly-56 compiled in about 5 minutes with 24 jobs, and took 13.5 to 14 minutes in all
+  ([build times](development.md#build-times)).
 - **S3 done (2026-11-04, boot13).** The title screen renders at 60 fps: black for ~23 s (~1,400 presents) while it
   loads, then the logo, smoke and the menu (New Game / Options / ZELDA NOTES Setting), through the Vulkan back end.
   It runs the 150 s out with no crash. What it took, in boot order:
@@ -240,12 +253,18 @@ dump, the runtime made game-neutral, the stage-1 tools checked on MKW's dump as 
   slower, narrow barriers no change, RX_VK_WAIT_GPU no help.
 - Tools: RX_VK_FRAMELOG + scripts/framelog.py (every frame shown), RX_VK_PROBE=2 (the passes at speed), RX_VK_SLOW_LOG, HOS_WATCH.
 - A release build (`RX_RELEASE=1` at build time) precompiles before the game starts; test builds do not unless RX_VK_PRECOMPILE=1.
-  hookshot_programs.bin (with hookshot_programs.idx, the list of its records), hookshot_pipelines.bin and mkw_vk_pipelines.bin go
+  longshot_programs.bin (with longshot_programs.idx, the list of its records), longshot_pipelines.bin and mkw_vk_pipelines.bin go
   beside the executable.
+- A program the driver's compiler faulted on (guarded_graphics) is never asked of the driver again (gpu/vk/driver_faults.h). On AMD's Windows
+  driver the caught fault left the program's compile unfinished inside it, and every later build of that program waited there
+  forever: the pause-menu freeze of issue 996, seen in a full dump. On AMD one program's builds also go to the driver one at a
+  time (RX_VK_DRIVER_FAULTS=2: on every driver); other drivers keep building a program's variants side by side.
+  The faults are kept per driver version in longshot_driver_faults.txt beside the executable.
 
 ## 11. Findings, 2026-11-06, day
 
-- Builds: `nx2/split_hot.py` puts code_hot.c in eight files that compile side by side, 79 minutes to about 6. `RX_PGO=gen` counts branches
+- Builds: `nx2/split_hot.py` puts code_hot.c in eight files that compile side by side, 79 minutes to about 6
+  (a release ships no hot list, so a player's build has no hot pieces: every lifted file is built at `-O1`). `RX_PGO=gen` counts branches
   (host/pgo_rt.c writes LLVM raw format 11, the toolchain has no compiler-rt profile library), `HOS_PGO=<path>` with `<path>.reset` and
   `<path>.dump` files drives a run, `nx2/pgo_pieces.py` fits the merged profile to the pieces, `RX_PGO=<file>` uses it. `RX_VK_ONLY=1`: the renderer alone.
 - Dark frames, open: lit surfaces come out black for one frame, geometry and depth intact. 5% with `RX_VK_FRAMEGEN=0`, 2.9% with the menu's Off, about 0.1% at 4x.
@@ -260,6 +279,29 @@ dump, the runtime made game-neutral, the stage-1 tools checked on MKW's dump as 
   repeat with a delay that keeps ~45 fps. The MKW session's mirror page skip fired 0 times here and was removed.
   Not an instrument's doing: with nothing attached, photographed from outside the window (37 s, ~2200 photographs): 16 with `RX_VK_FRAMEGEN=0`, none at the user's 4x. With
   `RX_VK_SUBMIT_DELAY_US`: 7 at 300, 0 at 1000; a repeat at 1000 with shots still had 7 events against 50-60. So it is a race with the game's threads: less overlap, fewer. The delay is a test, not a fix.
-- The builder's first full build: 43 minutes at below-normal priority, 0 failures; the folder starts from a double click and reaches the title at 60 fps.
+- The builder's first full build: 43 minutes at below-normal priority (13.5 to 14 minutes for nightly-56 on 2026-11-13:
+  [build times](development.md#build-times)), 0 failures; the folder starts from a double click and reaches the title at 60 fps.
 - Render conditions here gate single lights and read reports earlier in the same stream, so they cannot be read at record time.
 
+
+## 12. Findings, 2026-11-11: what a frame waits for
+
+- `HOS_CHAIN` + `scripts/chain.py` walk each frame back from its present (RTX 3090, Ryzen 9 7900X, Linux, NVIDIA 620.70, Kokiri
+  Forest standing, 2560x1440, ~1250 draws, recording on: 17.8 ms a frame). The frame is one loop through two threads, nothing else:
+  - the presentation thread, from the main thread's message to its present: 12.5 ms (the replay of the frame's commands);
+  - the present call, to the event that releases the main thread: 2.7 ms, ~2.4 of them inside `vkQueuePresentKHR` (in the driver,
+    in `poll`);
+  - the main thread, from that event to its next message: 2.6 ms, ~2 of them the renderer's work on its own submits (the submit's
+    capture copies, `memory_collect_written`, its replay).
+  The game's job threads (ModuleSystemWorker, BaseProcExecutor) and the background threads are on the path under 0.1 ms a frame;
+  waits for a virtual core 0.27 ms (the presentation thread taking one back after its present); hand-offs ~10 us each. The main
+  thread waits ~4.5 ms a frame on the presentation thread. So the game's own CPU work is not what holds the frame here: the
+  replay, the present and the submits on the game's threads are. ("Gameplay is CPU-bound: the game's threads next", section 9,
+  is answered: the renderer's work on them.)
+- The present's wait is the GPU finishing the frame: with `RX_VK_PRESENT_THREAD=1` the presenter thread waits 1.75-1.92 ms a
+  present for the copy's fence and then 0.18-0.22 ms in `vkQueuePresentKHR`. The game's present call then returns in 0.07-0.10 ms
+  (median) instead of 2.0-2.1, and the frame (recording on, alternating runs) took 20.1 and 19.0 ms against 22.1 and 22.9. With the
+  present off the path, the main thread's job waits (lr 0x80070bfc) start to show on it. (`RX_VK_NO_WRITEBACK=1`, the 1280x720
+  output, a 240 Hz compositor and `RX_VK_IMMEDIATE=1` left the wait as it was.)
+- Measuring on this PC: two runs of the same build vary by 10% and more (other work on the machine); fps differences under that
+  need many alternating runs. `chain.py`'s stretches are steadier: they say which part moved.

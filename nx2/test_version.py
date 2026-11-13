@@ -19,7 +19,7 @@ def tree(root, eol):
 
 
 def main():
-    os.environ.pop("HOOKSHOT_VERSION", None)
+    os.environ.pop("LONGSHOT_VERSION", None)
     with tempfile.TemporaryDirectory() as lf, tempfile.TemporaryDirectory() as crlf:
         tree(lf, "\n")
         tree(crlf, "\r\n")
@@ -32,14 +32,14 @@ def main():
         with open(os.path.join(lf, "VERSION"), "w") as f:
             f.write("movie-sync\nignored second line\n")
         assert version.release(lf) == "movie-sync"
-        os.environ["HOOKSHOT_VERSION"] = "from-env"
-        assert version.release(lf) == "from-env", "HOOKSHOT_VERSION comes first"
+        os.environ["LONGSHOT_VERSION"] = "from-env"
+        assert version.release(lf) == "from-env", "LONGSHOT_VERSION comes first"
 
-        os.environ["HOOKSHOT_VERSION"] = 'v1 "quoted" \\ & | %PATH%'
+        os.environ["LONGSHOT_VERSION"] = 'v1 "quoted" \\ & | %PATH%'
         d = version.describe(lf)
         assert not set(d) & set('"\\&|%'), d
-        assert version.define(lf).startswith('-DHOOKSHOT_VERSION="') and version.define(lf).endswith(')"')
-        os.environ.pop("HOOKSHOT_VERSION")
+        assert version.define(lf).startswith('-DLONGSHOT_VERSION="') and version.define(lf).endswith(')"')
+        os.environ.pop("LONGSHOT_VERSION")
     print("version: ok (%s)" % version.describe())
 
 

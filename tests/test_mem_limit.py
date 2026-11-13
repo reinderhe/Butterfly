@@ -1,4 +1,4 @@
-"""HOOKSHOT_MEM_LIMIT_GB, the builder's Build memory choice (nx2/build.py MemoryGate): compiles start by the sum of their needs against
+"""LONGSHOT_MEM_LIMIT_GB, the builder's Build memory choice (nx2/build.py MemoryGate): compiles start by the sum of their needs against
 that limit, whatever is free, above the same floor as without it, and without it the free-memory policy is what it was.
 
 python -I -B tests/test_mem_limit.py
@@ -23,14 +23,14 @@ def check(what, ok):
 
 def gate_with(limit):
     if limit is None:
-        os.environ.pop("HOOKSHOT_MEM_LIMIT_GB", None)
+        os.environ.pop("LONGSHOT_MEM_LIMIT_GB", None)
     else:
-        os.environ["HOOKSHOT_MEM_LIMIT_GB"] = limit
+        os.environ["LONGSHOT_MEM_LIMIT_GB"] = limit
     return build.MemoryGate()
 
 
 def main():
-    saved_env = os.environ.get("HOOKSHOT_MEM_LIMIT_GB")
+    saved_env = os.environ.get("LONGSHOT_MEM_LIMIT_GB")
     saved_need, saved_free = build.mem_need, build.free_mb
     build.mem_need = lambda src: NEED
     try:
@@ -73,9 +73,9 @@ def main():
     finally:
         build.mem_need, build.free_mb = saved_need, saved_free
         if saved_env is None:
-            os.environ.pop("HOOKSHOT_MEM_LIMIT_GB", None)
+            os.environ.pop("LONGSHOT_MEM_LIMIT_GB", None)
         else:
-            os.environ["HOOKSHOT_MEM_LIMIT_GB"] = saved_env
+            os.environ["LONGSHOT_MEM_LIMIT_GB"] = saved_env
     print("ok")
 
 

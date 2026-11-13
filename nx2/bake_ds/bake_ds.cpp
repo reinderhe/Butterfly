@@ -1,4 +1,4 @@
-// (bake-deepseek) Offline HKSEED01 -> SPIR-V -> hookshot_programs.bin, with no GPU, no game and no window.
+// (bake-deepseek) Offline HKSEED01 -> SPIR-V -> longshot_programs.bin, with no GPU, no game and no window.
 //
 // This is the CPU half of the bake: every stage the census enumerated is parsed exactly as the back end
 // parses it at run time (parse_code, gpu/vk/vk_shader.cpp:155), lowered with the same Ampere -> Maxwell
@@ -9,16 +9,16 @@
 //
 // Outputs, under <outdir>:
 //   spv/<program-key>.<nvn-stage>.spv   per stage
-//   hookshot_programs.bin               the back end's program cache format (kDiskMagic 0x31505348 + stamp +
+//   longshot_programs.bin               the back end's program cache format (kDiskMagic 0x31505348 + stamp +
 //                                       records exactly as program_cache_save writes them)
 //   bake_report.jsonl                   one line per program attempt: key, kind, stages, descriptors, status
 //   bake_manifest.json                  stamp inputs, counts, what was not translated and why
 //
-//   bake_ds translate --seed <hookshot_shaders.bin> --out <dir> [--stamp <hex16>] [--depth 0|1]
+//   bake_ds translate --seed <longshot_shaders.bin> --out <dir> [--stamp <hex16>] [--depth 0|1]
 //                     [--target plain|tensor|tensor-software|rdna2|gfx1201] [--feature <list>]
 //                     [--variants 0|1|2|all] [--variant-cap N] [--limit N] [--no-bank] [--program-size N]
 //                     [--ssbo-align N] [--spv-dir <dir>]
-//   bake_ds verify --bank <hookshot_programs.bin> [--target <name>] [--stamp <hex16>] [--depth 0|1]
+//   bake_ds verify --bank <longshot_programs.bin> [--target <name>] [--stamp <hex16>] [--depth 0|1]
 //
 // The bank's standing: the header stamp is what a build of the SAME compiler/library computes for its
 // Shader::Info/Program layout (disk_stamp, vk_shader.cpp:837). This tool computes it from its own layout, so a
@@ -68,7 +68,10 @@
 #include "shader_recompiler/frontend/maxwell/control_flow.h"
 #include "shader_recompiler/frontend/maxwell/translate_program.h"
 #include "shader_recompiler/host_translate_info.h"
-#include "shader_recompiler/ir_opt/oot_visual_workaround.h"
+#include "shader_recompiler/ir_opt/fragment_output_guard.h"
+#ifndef LONGSHOT_ENV_H   // (env_on, as the live back end reads its switches)
+#include "longshot_env.h"
+#endif
 #include "shader_recompiler/object_pool.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/program_header.h"
@@ -413,7 +416,7 @@ public:
     u32 LocalMemorySize() const override { return local_memory; }
     u32 SharedMemorySize() const override {
         // (live: vk_shader.cpp:416; RX_VK_SHARED_48K=1 is the pre-PR-91 48 KB)
-        static const bool old = std::getenv("RX_VK_SHARED_48K") != nullptr;
+        static const bool old = env_on("RX_VK_SHARED_48K");
         return old ? 48u << 10 : nvn.shared_memory;
     }
     std::array<u32, 3> WorkgroupSize() const override {
@@ -421,7 +424,7 @@ public:
     }
     bool HasHLEMacroState() const override {
         // (live: vk_shader.cpp:430; RX_VK_NO_DRAW_PARAMS=1 is the pre-fix bank)
-        static const bool off = std::getenv("RX_VK_NO_DRAW_PARAMS") != nullptr;
+        static const bool off = env_on("RX_VK_NO_DRAW_PARAMS");
         return !off && stage == Shader::Stage::VertexB;
     }
     bool HasNativeInstructions() const override { return true; }
@@ -515,16 +518,6 @@ Shader::HostTranslateInfo host_info() {   // (live: vk_shader.cpp:508)
     return h;
 }
 
-/// (live: vk_shader.cpp:805 oot_visual; off unless RX_VK_OOT_VISUAL is set, which is also what the cache stamp sees)
-void oot_visual(Shader::IR::Program& program, uint64_t key) {
-    static const bool on = std::getenv("RX_VK_OOT_VISUAL") && std::atoi(std::getenv("RX_VK_OOT_VISUAL")) != 0;
-    if (!on) return;
-    static const float fog = std::getenv("RX_VK_OOT_FOG") ? static_cast<float>(std::atof(std::getenv("RX_VK_OOT_FOG"))) : 0.08f;
-    static const float exposure =
-        std::getenv("RX_VK_OOT_EXPOSURE") ? static_cast<float>(std::atof(std::getenv("RX_VK_OOT_EXPOSURE"))) : 1.0f;
-    Shader::Optimization::ApplyOotVisualWorkaround(program, fog, exposure);
-    (void)key;
-}
 
 struct Translation {
     Shader::ObjectPool<Shader::IR::Inst> insts;
@@ -708,9 +701,11 @@ uint64_t disk_stamp(uint64_t translator_stamp, uint32_t depth) {   // (live: vk_
     // sit where `environ` puts them -- the same position a run of this build sees. A multi-variable environment
     // whose allowlist entries are in another order is a different stamp, as it is live.)
     for (char** e = environ; e && *e; e++) {
-        for (const char* pre : {"RX_VK_OOT", "RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK",
-                                "RX_VK_GP", "RX_VK_FOLLOW", "RX_VK_NO_FOLLOW", "RX_VK_NO_F16", "RX_VK_SHARED", "RX_VK_MESH",
-                                "EDEN_"})
+        for (const char* pre : {"RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK",
+                                "RX_VK_GP_", "RX_VK_FOLLOW", "RX_VK_NO_FOLLOW", "RX_VK_NO_F16", "RX_VK_SHARED", "RX_VK_MESH",
+                                "RX_VK_NO_INVARIANT", "RX_VK_MARKERS", "RX_VK_NO_CBUF_LOAD_RULE",
+                                "RX_VK_PTR_SPLIT_FALLBACK", "RX_VK_ALL_GLOBAL_PROGS", "RX_VK_NO_EXTREGS", "RX_VK_NO_DRAW_PARAMS",
+                                "RX_VK_MISS_LOG", "RX_VK_BLOCK_PROBE", "EDEN_"})
             if (!std::strncmp(*e, pre, std::strlen(pre))) add(*e, std::strlen(*e));
     }
     return h;
@@ -929,11 +924,11 @@ constexpr uint32_t kVkMesh = 0x00000080;       // VK_SHADER_STAGE_MESH_BIT_EXT
 int usage() {
     std::fprintf(stderr,
                  "usage:\n"
-                 "  bake_ds translate --seed <hookshot_shaders.bin> --out <dir> [--stamp <hex16>] [--depth 0|1]\n"
+                 "  bake_ds translate --seed <longshot_shaders.bin> --out <dir> [--stamp <hex16>] [--depth 0|1]\n"
                  "                    [--target plain|tensor|tensor-software|rdna2|gfx1201] [--feature <list>]\n"
                  "                    [--variants 0|1|2|all] [--variant-cap N] [--limit N] [--no-bank] [--program-size N]\n"
                  "                    [--ssbo-align N] [--spv-dir <dir>]\n"
-                 "  bake_ds verify --bank <hookshot_programs.bin> [--target <name>] [--feature <list>] [--stamp <hex16>] [--depth 0|1]\n"
+                 "  bake_ds verify --bank <longshot_programs.bin> [--target <name>] [--feature <list>] [--stamp <hex16>] [--depth 0|1]\n"
                  "  bake_ds query                       (physical devices' properties/features: no logical device)\n"
                  "\n"
                  "  --target      the feature profile the bank is baked for; its switches enter the cache stamp, so a bank\n"
@@ -1089,7 +1084,7 @@ int run_translate(const Options& o) {
     const std::string spv_dir = o.spv_dir.empty() ? o.out + "/spv" : o.spv_dir;
     std::filesystem::create_directories(o.out, ec);
     std::filesystem::create_directories(spv_dir, ec);
-    // (HOOKSHOT_SHADER_STAMP is the translator half of the stamp; the tool's default 0 is for format tests.
+    // (LONGSHOT_SHADER_STAMP is the translator half of the stamp; the tool's default 0 is for format tests.
     // --stamp takes the value nx2/build.py computed and the game logged.)
     const uint64_t disk = disk_stamp(o.stamp == ~0ull ? 0 : o.stamp, o.depth);
     std::fprintf(stderr, "bake_ds: %zu programs, %zu stages; target %s (%s, integer variants %s); translator stamp %s -> "
@@ -1100,7 +1095,7 @@ int run_translate(const Options& o) {
                  sizeof(ProgramLayout));
     for (const std::string& kv : o.target.env) std::fprintf(stderr, "bake_ds: target requires %s in the game's environment\n", kv.c_str());
     FILE* bank = nullptr;
-    std::string bank_path = o.out + "/hookshot_programs.bin";
+    std::string bank_path = o.out + "/longshot_programs.bin";
     std::vector<uint8_t> bank_head;
     if (o.bank) {
         bank = std::fopen(bank_path.c_str(), "wb");
@@ -1215,7 +1210,6 @@ int run_translate(const Options& o) {
             try {
                 auto tr = translate(env, false);
                 t.questions = env.texture_questions;
-                oot_visual(tr->program, by_stage[5]->key);
                 Shader::RuntimeInfo rt{};
                 StageResult sr;
                 sr.info = tr->program.info;
@@ -1463,7 +1457,6 @@ int run_translate(const Options& o) {
                             if (fs->program.info.loads.Generic(i) && !mesh_t->program.info.stores.Generic(i))
                                 frt.point_coord_generics.set(i);
                     for (int i = 0; i < 8; i++) frt.color_output_types[i] = static_cast<Shader::AttributeType>(no_types[i]);
-                    oot_visual(fs->program, by_stage[1]->key);
                     uint32_t float_targets = 0;
                     for (int i = 0; i < 8; i++)
                         if (frt.color_output_types[i] == Shader::AttributeType::Float) float_targets |= 1u << i;
@@ -1502,7 +1495,6 @@ int run_translate(const Options& o) {
                     OfflineEnv fenv{*by_stage[1], Shader::Stage::Fragment};
                     auto ft = translate(fenv, true);
                     questions += fenv.texture_questions;
-                    oot_visual(ft->program, by_stage[1]->key);
                     Shader::RuntimeInfo frt{};
                     frt.previous_stage_stores = t->program.info.stores;
                     for (int i = 0; i < 8; i++) frt.color_output_types[i] = static_cast<Shader::AttributeType>(no_types[i]);
@@ -1586,7 +1578,7 @@ int run_translate(const Options& o) {
                      o.variant_cap, duplicate_variants, Shader::Backend::SPIRV::mma_software ? "true" : "false",
                      env_json.c_str(), hex64(disk).c_str(), hex64(o.stamp == ~0ull ? 0 : o.stamp).c_str(),
                      o.depth, sizeof(Shader::Info), sizeof(ProgramLayout), static_cast<unsigned long long>(g_ssbo_align),
-                     o.bank ? "\"hookshot_programs.bin\"" : "null");
+                     o.bank ? "\"longshot_programs.bin\"" : "null");
         std::fclose(mf);
     }
     std::fprintf(stderr, "bake_ds: %zu slots: %zu translated, %zu duplicate answer variants dropped, %zu failed, %zu programs skipped (unreadable/mesh)\n",

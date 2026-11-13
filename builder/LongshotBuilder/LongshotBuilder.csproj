@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows builder has no window (Program.cs): its cli mode runs nx2/make_game.py for RecompLauncher, through the setup.
+       Players use the Longshot Launcher. A GUI-subsystem program all the same: started by the setup or RecompLauncher with
+       their pipes, it opens no console window, and started by hand it shows its message in a message box -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>LongshotBuilder</AssemblyName>
+    <RootNamespace>LongshotBuilder</RootNamespace>
+    <Version>0.1.0</Version>
+    <Product>Longshot Builder</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon Condition="Exists('..\..\work\longshot.ico')">..\..\work\longshot.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- Needs nothing installed: dotnet publish -c Release. A folder (the app and .NET's own signed files), not one compressed exe:
+       antivirus programs took the self-extracting single file for a trojan and removed it -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+</Project>

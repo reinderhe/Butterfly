@@ -142,7 +142,7 @@ public:
     /// Returns type vector.
     Id TypeVector(Id component_type, int component_count);
 
-    /// (hookshot) SPV_KHR_cooperative_matrix: scope, rows, columns and use are constant ids.
+    /// (longshot) SPV_KHR_cooperative_matrix: scope, rows, columns and use are constant ids.
     Id TypeCooperativeMatrixKHR(Id component_type, Id scope, Id rows, Id columns, Id use);
 
     /// Returns type matrix.
@@ -714,9 +714,9 @@ public:
     /// Floating-point multiplication of Operand 1 and Operand 2.
     Id OpFMul(Id result_type, Id operand_1, Id operand_2);
 
-    /// (hookshot) SPV_KHR_cooperative_matrix: result = a * b + c over the subgroup.
+    /// (longshot) SPV_KHR_cooperative_matrix: result = a * b + c over the subgroup.
     Id OpCooperativeMatrixMulAddKHR(Id result_type, Id a, Id b, Id c);
-    /// (hookshot) SPV_KHR_cooperative_matrix: load from memory (layout and stride are ids).
+    /// (longshot) SPV_KHR_cooperative_matrix: load from memory (layout and stride are ids).
     Id OpCooperativeMatrixLoadKHR(Id result_type, Id pointer, Id layout, Id stride);
 
     /// Full signed interger multiplication of Operand 1 and Operand 2.
@@ -1385,6 +1385,9 @@ public:
     /// 2) get a New Value by integer addition of Original Value and Value, and
     /// 3) store the New Value back through Pointer.
     Id OpAtomicIAdd(Id result_type, Id pointer, Id memory, Id semantics, Id value);
+
+    /// (longshot) SPV_EXT_shader_atomic_float_add: the same as OpAtomicIAdd, by floating-point addition.
+    Id OpAtomicFAddEXT(Id result_type, Id pointer, Id memory, Id semantics, Id value);
 
     /// Perform the following steps atomically with respect to any other atomic accesses within
     /// Scope to the same location:

@@ -1,4 +1,4 @@
-"""A program cache record is read within its own bytes (hookshot_programs.bin).
+"""A program cache record is read within its own bytes (longshot_programs.bin).
 
 A record whose counts ran past its end was read on into the heap until an unmapped page: a crash at start in
 program_cache_load. The Reader of gpu/vk/vk_shader.cpp is compiled here on its own (with AddressSanitizer when the
@@ -12,6 +12,15 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _with_cache(path):
+    """vk_shader.cpp with the program cache it held before (vk_progcache.cpp and .h beside it, outside the translator stamp): definitions first"""
+    parts = [path.read_text(encoding="utf-8")]
+    for name in ("vk_progcache.cpp", "vk_progcache.h"):
+        if (path.parent / name).exists():
+            parts.append((path.parent / name).read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
 SOURCE = ROOT / "gpu" / "vk" / "vk_shader.cpp"
 
 
@@ -81,18 +90,25 @@ int main() {
 
 class ProgramCacheReaderTests(unittest.TestCase):
     def test_source_uses_bounds(self):
-        source = SOURCE.read_text(encoding="utf-8")
+        source = _with_cache(SOURCE)
         load = block(source, "void program_cache_read(")
-        self.assertIn("Reader r{data.data() + 16, data.data() + data.size()}", load)
+        self.assertIn("Reader r{payload, payload + payload_size}", load)   # (the record's own bytes, compressed or not)
+        self.assertIn("program_cache_payload(", load)
         self.assertIn("r.bad", load)
         self.assertIn("r.count(", block(source, "void get_info("))
+
+    def test_every_reader_uses_the_payload_helper(self):
+        source = _with_cache(SOURCE)
+        self.assertIn("bool program_cache_payload(", source)
+        for marker in ("void program_cache_read(", "void program_cache_each(", "SeedVariants seed_compute("):
+            self.assertIn("program_cache_payload(", block(source, marker), marker)
 
     def test_reader_stays_in_record(self):
         compiler = shutil.which("g++") or shutil.which("clang++")
         if not compiler:
             self.skipTest("no C++ compiler")
-        reader = block(SOURCE.read_text(encoding="utf-8"), "struct Reader {")
-        with tempfile.TemporaryDirectory(prefix="hookshot-program-cache-") as tmp:
+        reader = block(_with_cache(SOURCE), "struct Reader {")
+        with tempfile.TemporaryDirectory(prefix="longshot-program-cache-") as tmp:
             src, binary = Path(tmp) / "t.cpp", Path(tmp) / "t"
             src.write_text(TEST.replace("READER", reader), encoding="utf-8")
             base = [compiler, "-std=c++20", "-Wall", "-Wextra", "-O1", "-g", str(src), "-o", str(binary)]
@@ -105,7 +121,7 @@ class ProgramCacheReaderTests(unittest.TestCase):
 
     def test_descriptor_counts_are_bounded(self):
         # (two cached counts of 2^31 wrapped the layout's sum to 0; one made the binds loop billions of times)
-        source = SOURCE.read_text(encoding="utf-8")
+        source = _with_cache(SOURCE)
         self.assertIn("if (!descriptor_counts_fit(i)) r.bad = true;", block(source, "void get_info("))
         draw = (ROOT / "gpu" / "vk" / "vk_draw.cpp").read_text(encoding="utf-8")
         self.assertIn("uint64_t total = 0;", block(draw, "void ensure_layout("))
@@ -129,7 +145,7 @@ int main() {
     return descriptor_counts_fit(i) ? 3 : 0;
 }
 """
-        with tempfile.TemporaryDirectory(prefix="hookshot-descriptor-counts-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="longshot-descriptor-counts-") as tmp:
             src, binary = Path(tmp) / "t.cpp", Path(tmp) / "t"
             src.write_text(test, encoding="utf-8")
             build = subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", str(src), "-o", str(binary)],

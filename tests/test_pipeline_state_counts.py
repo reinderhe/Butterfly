@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+RUN_ALL_ARGS = ["--cxx", "{cxx}"]
+
 ROOT=Path(__file__).resolve().parents[1]
 
 def block(text, marker):
@@ -70,10 +72,10 @@ int main(int argc,char** argv) {
  for(uint32_t i=0;i<24;i++)maximum.answers[i]=100+i;
  for(uint32_t i=0;i<32;i++)maximum.questions[i]=uint8_t(i);
  zero.code[0]=22;zero.samples=1;
- // (hookshot) the targets a pipeline is made with: at most 8, a sample count and topology Vulkan has, 16 attributes
+ // (longshot) the targets a pipeline is made with: at most 8, a sample count and topology Vulkan has, 16 attributes
  StateRec bad_n=maximum,neg_n=maximum,bad_samples=maximum,no_samples=maximum,bad_topo=maximum,bad_vattr=maximum;
  bad_n.n=9;neg_n.n=0xFFFFFFFFu;bad_samples.samples=3;no_samples.samples=0;bad_topo.topo=99;bad_vattr.nvattr=17;
- // (hookshot) formats the device draws to: any number reached the driver as a VkFormat
+ // (longshot) formats the device draws to: any number reached the driver as a VkFormat
  StateRec drawn=maximum,bad_color=maximum,bad_depth=maximum;
  drawn.color_format[0]=37;drawn.has_depth=1;drawn.depth_format=126;
  bad_color.color_format[7]=0x7fffffffu;bad_depth.has_depth=1;bad_depth.depth_format=37;
@@ -88,7 +90,7 @@ int main(int argc,char** argv) {
   if(!equal){std::cerr<<label<<": reader returned "<<got.size()<<" records, expected "<<expected.size()<<'\n';++failures;}
  };
  // Both preparation inputs and state_record's read-before-append share this exact reader.
- for(const char* name:{"hookshot_pipeline_states.bin","hookshot_pipeline_states_shipped.bin"}){
+ for(const char* name:{"longshot_pipeline_states.bin","longshot_pipeline_states_shipped.bin"}){
   const auto path=std::filesystem::path(argv[1])/name;
   write(path,{maximum});check(path,{maximum},"valid maximum counts");
   write(path,{bad_answers});check(path,{},"answer count above array");

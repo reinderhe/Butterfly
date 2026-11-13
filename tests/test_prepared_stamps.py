@@ -1,6 +1,6 @@
 """The prepare keeps two stamps, and the driver's part is made from the program cache.
 
-hookshot_prepared.bin said what the shaders were translated for (the translator and the seed), and the stage libraries were built
+longshot_prepared.bin said what the shaders were translated for (the translator and the seed), and the stage libraries were built
 only as a program was translated. A program kept already was never translated again, so its libraries were never built again
 either: a player who prepared without libraries and then switched them on had "0 new, 0 stage libraries", and after a driver
 update, which empties the driver's cache, nothing made them again. The record now has a sixth word for the driver's part, and
@@ -19,6 +19,15 @@ from pathlib import Path
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _with_cache(path):
+    """vk_shader.cpp with the program cache it held before (vk_progcache.cpp and .h beside it, outside the translator stamp): definitions first"""
+    parts = [path.read_text(encoding="utf-8")]
+    for name in ("vk_progcache.cpp", "vk_progcache.h"):
+        if (path.parent / name).exists():
+            parts.append((path.parent / name).read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
 DRAW = ROOT / "gpu" / "vk" / "vk_draw.cpp"
 SHADER = ROOT / "gpu" / "vk" / "vk_shader.cpp"
 
@@ -38,7 +47,7 @@ def main():
     ap.add_argument("--cxx", default="g++")
     a = ap.parse_args()
     draw = DRAW.read_text(encoding="utf-8")
-    shader = SHADER.read_text(encoding="utf-8")
+    shader = _with_cache(SHADER)
     start = draw.index("struct PreparedFor {")
     helpers = draw[start:draw.index("} // namespace", start)]
     cpp = r"""
@@ -57,7 +66,7 @@ def main():
 #include <vector>
 """ + helpers + r"""
 int main(int argc, char** argv) {
-    const std::string dir = argv[1], path = dir + "/hookshot_prepared.bin", seed = dir + "/hookshot_shaders.bin";
+    const std::string dir = argv[1], path = dir + "/longshot_prepared.bin", seed = dir + "/longshot_shaders.bin";
     int fails = 0;
     const auto put = [&](const std::string& to, const void* d, size_t n) {
         FILE* f = fopen(to.c_str(), "wb");
@@ -162,7 +171,7 @@ int main(int argc, char** argv) {
     keys = block(shader, "std::vector<uint64_t> program_cache_keys(")
     if "fread(" in keys or "disk_records" not in keys or "shader_mu" not in keys:
         raise SystemExit("program_cache_keys: wanted the keys from the list of records and the variants in memory, no record read")
-    env = block(shader, "uint64_t disk_stamp(")
+    env = block(shader, "uint64_t translator_stamp(")
     if '"RX_VK_GP"' in env or '"RX_VK_GP_"' not in env:
         raise SystemExit("the translator's stamp takes RX_VK_GPL: switching the libraries on throws the program cache away")
     print("PASS: two stamps in the prepared file; the driver's part is made from the program cache, on its own when it alone is stale")

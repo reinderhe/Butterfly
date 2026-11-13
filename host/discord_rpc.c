@@ -1,10 +1,10 @@
-/* (hookshot) Discord Rich Presence: "Playing Hookshot" with the time played in the player's Discord status, through the local
+/* (longshot) Discord Rich Presence: "Playing Longshot" with the time played in the player's Discord status, through the local
    IPC of a Discord client running on this PC. Nothing leaves the machine but the activity itself, and nothing is sent while the
    Insert menu's "Discord status" row is off (on by default; it does nothing without a Discord client running).
 
    Discord shows the *application's* name above the status ("Playing <name>") and its art: the status needs a Discord application
-   of its own (discord.com/developers/applications, named Hookshot, its art uploaded under Rich Presence > Art Assets with the key
-   below). Its Application ID goes into HOOKSHOT_DISCORD_APP_ID_DEFAULT; hookshot_options.ini's discord_app_id= or
+   of its own (discord.com/developers/applications, named Longshot, its art uploaded under Rich Presence > Art Assets with the key
+   below). Its Application ID goes into LONGSHOT_DISCORD_APP_ID_DEFAULT; longshot_options.ini's discord_app_id= or
    HOS_DISCORD_APP_ID override it. With no id the thread stays idle and says so once in the log.
 
    One host thread owns the connection. It connects to the first of Discord's discord-ipc-0..9 that completes a handshake and
@@ -35,8 +35,8 @@
 
 #include "../gpu/vk/vk_api.h"
 
-#define HOOKSHOT_DISCORD_APP_ID_DEFAULT "1569529153349357731"   /* (the Hookshot application's id, digits) */
-#define HOOKSHOT_DISCORD_IMAGE_DEFAULT "hookshot"     /* (its large-image art asset key) */
+#define LONGSHOT_DISCORD_APP_ID_DEFAULT "1570559772111933578"   /* (the Longshot application's id, digits) */
+#define LONGSHOT_DISCORD_IMAGE_DEFAULT "longshot"     /* (its large-image art asset key) */
 
 void hos_log(const char *fmt, ...);
 int rx_option(int id, int otherwise);
@@ -135,14 +135,14 @@ static int valid_app_id(const char *s) {
         if (*s < '0' || *s > '9') return 0;
     return 1;
 }
-/* the application id: HOS_DISCORD_APP_ID, then hookshot_options.ini's discord_app_id=, then the default */
+/* the application id: HOS_DISCORD_APP_ID, then longshot_options.ini's discord_app_id=, then the default */
 static void read_app_id(char *out, size_t cap) {
-    snprintf(out, cap, "%s", HOOKSHOT_DISCORD_APP_ID_DEFAULT);
+    snprintf(out, cap, "%s", LONGSHOT_DISCORD_APP_ID_DEFAULT);
     char path[1024];
     const DWORD n = hos_game_path_a(path, (DWORD)sizeof path);
     char *slash = n ? (strrchr(path, '\\') ? strrchr(path, '\\') : strrchr(path, '/')) : NULL;
     if (slash) {
-        snprintf(slash + 1, (size_t)(path + sizeof path - slash - 1), "hookshot_options.ini");
+        snprintf(slash + 1, (size_t)(path + sizeof path - slash - 1), "longshot_options.ini");
         FILE *f = fopen(path, "r");
         if (f) {
             char line[128];
@@ -224,10 +224,10 @@ static int send_activity(Ipc p, long long started) {
     snprintf(version, sizeof version, "%s", hos_version());
     version[strcspn(version, " +")] = 0;   /* ("v2.0.12 (source ...)": the release alone) */
     snprintf(json, sizeof json,
-             "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%u\",\"args\":{\"pid\":%lu,\"activity\":{\"details\":\"Ocarina of Time\","
-             "\"state\":\"Hookshot %s\",\"timestamps\":{\"start\":%lld},\"assets\":{\"large_image\":\"%s\",\"large_text\":"
-             "\"Hookshot %s\"}}}}",
-             ++nonce, process_id(), version, started, HOOKSHOT_DISCORD_IMAGE_DEFAULT, version);
+             "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%u\",\"args\":{\"pid\":%lu,\"activity\":{\"details\":\"Longshot\","
+             "\"state\":\"Longshot %s\",\"timestamps\":{\"start\":%lld},\"assets\":{\"large_image\":\"%s\",\"large_text\":"
+             "\"Longshot %s\"}}}}",
+             ++nonce, process_id(), version, started, LONGSHOT_DISCORD_IMAGE_DEFAULT, version);
     if (!write_frame(p, OP_FRAME, json)) return 0;
     uint32_t op = 0;
     const int r = read_frame(p, &op, answer, sizeof answer, 2000);
@@ -266,8 +266,8 @@ static void presence_main(void) {
         }
         if (!app_id[0]) {
             if (!said_no_app)
-                hos_log("discord: no application id: discord_app_id= in hookshot_options.ini or HOS_DISCORD_APP_ID (the "
-                        "Discord application named Hookshot); the status stays off");
+                hos_log("discord: no application id: discord_app_id= in longshot_options.ini or HOS_DISCORD_APP_ID (the "
+                        "Discord application named Longshot); the status stays off");
             said_no_app = 1;
             continue;
         }

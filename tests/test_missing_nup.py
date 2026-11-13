@@ -12,7 +12,7 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(os.environ.get("HOOKSHOT_MISSING_NUP_TEST_SOURCE", ROOT / "nx2/make_game.py"))
+SOURCE = Path(os.environ.get("LONGSHOT_MISSING_NUP_TEST_SOURCE", ROOT / "nx2/make_game.py"))
 # The source override changes only make_game.py; its ordinary, stdlib-only toolchain import stays current.
 sys.path.insert(0, str(ROOT / "third_party/a64-kit/tools"))
 spec = importlib.util.spec_from_file_location("make_game_missing_nup", SOURCE)
@@ -22,7 +22,7 @@ spec.loader.exec_module(make_game)
 
 class MissingNupTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hookshot-missing-nup-")
+        temporary = tempfile.TemporaryDirectory(prefix="longshot-missing-nup-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.assertEqual(self.root.parent, Path(tempfile.gettempdir()).resolve())
@@ -30,11 +30,11 @@ class MissingNupTests(unittest.TestCase):
         self.out, self.work = self.root / "output", self.root / "work"
         (self.out / "romfs").mkdir(parents=True)
         (self.out / "romfs/asset").write_bytes(b"authored asset")
-        (self.out / ".hookshot_exefs").mkdir()
-        (self.out / ".hookshot_exefs/main").write_bytes(b"authored code sentinel")
+        (self.out / ".longshot_exefs").mkdir()
+        (self.out / ".longshot_exefs/main").write_bytes(b"authored code sentinel")
         (self.out / "user/save").mkdir(parents=True)
         (self.out / "user/save/sentinel").write_bytes(b"authored save sentinel")
-        (self.out / ".hookshot_romfs").write_text("previous authored package\n", encoding="utf-8")
+        (self.out / ".longshot_romfs").write_text("previous authored package\n", encoding="utf-8")
         self.before = self.files()
         self.events = []
 
@@ -124,7 +124,7 @@ class MissingNupTests(unittest.TestCase):
         self.package = self.root / "existing cached game [1].nup"
         self.package.write_bytes(b"authored package sentinel")
         stamp = "unpacked by this builder: %s %d\n" % (self.package.name, self.package.stat().st_size)
-        (self.out / ".hookshot_romfs").write_text(stamp, encoding="utf-8")
+        (self.out / ".longshot_romfs").write_text(stamp, encoding="utf-8")
         self.before = self.files()
         code, text = self.invoke()
         self.assertEqual(code, 0, text)

@@ -1,4 +1,4 @@
-"""The local bake, end to end on this machine: game tree -> seed -> SPIR-V -> hookshot_programs.bin.
+"""The local bake, end to end on this machine: game tree -> seed -> SPIR-V -> longshot_programs.bin.
 
     python3 nx2/bake_ds/bake_all.py all --romfs <dir> --out <dir> [--dir <build dir>] [--stamp <hex16>]
                                     [--depth 0|1] [--variants all|0|1|2] [--limit N]
@@ -7,9 +7,9 @@
                                     [--no-spirv-val]
 
 Steps (each also a subcommand):
-  1. enumerate  nx2/bake_ds/romenum.py: BNSH/BAHS/NDSR/NDVE/.vsetb, SARC, zstd+dictionaries -> hookshot_shaders.bin
+  1. enumerate  nx2/bake_ds/romenum.py: BNSH/BAHS/NDSR/NDVE/.vsetb, SARC, zstd+dictionaries -> longshot_shaders.bin
   2. translate  nx2/bake_ds/bake_ds (built by nx2/bake_ds/build.sh): Ampere -> Maxwell -> Eden IR -> SPIR-V,
-                written as <spv-dir>/*.spv and in the back end's own cache format <out>/hookshot_programs.bin
+                written as <spv-dir>/*.spv and in the back end's own cache format <out>/longshot_programs.bin
   3. verify     bake_ds verify (the game's reader over the bank, with the target's stamp check) + spirv-val
 
 --target picks the feature profile: the switches the game must run with for this bank's SPIR-V to be the
@@ -42,7 +42,7 @@ TARGETS = ("plain", "tensor", "tensor-emulate", "eden-tensor", "tensor-software"
 
 
 def translator_stamp(root=ROOT):
-    """The sha1 half of HOOKSHOT_SHADER_STAMP, exactly as nx2/build.py:693-699 computes it: every file under
+    """The sha1 half of LONGSHOT_SHADER_STAMP, exactly as nx2/build.py:693-699 computes it: every file under
     gpu/vk/{eden,sirit,compat} plus vk_shader.cpp, vk_bank.cpp, vk_state.h, vk_api.h, relative path + CRLF-
     normalized bytes, sorted, first 16 hex. The cache stamp also mixes in sizeof(Shader::Info)/sizeof(Program),
     the library marker and RX_VK_*/EDEN_* env; bake_ds does that half (disk_stamp)."""
@@ -50,7 +50,7 @@ def translator_stamp(root=ROOT):
     files = [os.path.join(d, f) for top in ("eden", "sirit", "compat")
              for d, _, fs in os.walk(os.path.join(vk, top)) for f in fs]
     files = sorted(files) + [os.path.join(vk, n) for n in ("vk_shader.cpp", "vk_bank.cpp", "vk_state.h", "vk_api.h")]
-    h = hashlib.sha1()
+    h = hashlib.sha1(usedforsecurity=False)
     for f in files:
         with open(f, "rb") as src:
             h.update(os.path.relpath(f, vk).replace(os.sep, "/").encode() + src.read().replace(b"\r\n", b"\n"))
@@ -64,7 +64,7 @@ def run(cmd, **kw):
 
 def enumerate_step(romfs, out):
     os.makedirs(out, exist_ok=True)
-    seed = os.path.join(out, "hookshot_shaders.bin")
+    seed = os.path.join(out, "longshot_shaders.bin")
     manifest = os.path.join(out, "enum.json")
     r = romenum.enumerate_tree(romfs)
     romenum.write_seed(seed, r)
@@ -156,7 +156,7 @@ def translate_step(tool, seed, out, stamp=None, depth=0, variants="all", limit=0
 
 
 def verify_step(tool, out, stamp=None, target=None, features=None, ssbo_align=None, spv_dir=None, spirv_val=True):
-    bank = os.path.join(out, "hookshot_programs.bin")
+    bank = os.path.join(out, "longshot_programs.bin")
     cmd = [tool, "verify", "--bank", bank]
     if target and stamp:
         # (the same target + stamp the translation used: the loader's own check, vk_shader.cpp:902)
@@ -198,7 +198,7 @@ def main(argv=None):
     p.add_argument("command", choices=["all", "enumerate", "translate", "verify", "fixture", "query"])
     p.add_argument("--romfs")
     p.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "bake_ds_out"))
-    p.add_argument("--dir", dest="build_dir", default=os.path.join(tempfile.gettempdir(), "hookshot-ds"))
+    p.add_argument("--dir", dest="build_dir", default=os.path.join(tempfile.gettempdir(), "longshot-ds"))
     p.add_argument("--tool")
     p.add_argument("--stamp")
     p.add_argument("--depth", type=int, default=0)
@@ -244,7 +244,7 @@ def main(argv=None):
         enumerate_step(a.romfs, a.out)
         return 0
     if a.command == "translate":
-        seed = os.path.join(a.romfs, "hookshot_shaders.bin")
+        seed = os.path.join(a.romfs, "longshot_shaders.bin")
         rc, _ = translate_step(tool, seed, a.out, a.stamp, a.depth, a.variants, a.limit, ssbo_align, target,
                                a.features, a.variant_cap, a.spv_dir)
         return rc

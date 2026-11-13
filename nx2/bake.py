@@ -3,7 +3,7 @@
 End-to-end CPU-only pass (no Vulkan device, no game files needed for the
 skeleton itself):
 
-    python3 nx2/bake.py bake --seed <hookshot_shaders.bin> --bank <dir>
+    python3 nx2/bake.py bake --seed <longshot_shaders.bin> --bank <dir>
         [--limit N] [--resume] [--max-pipelines K]
 
 Stages:
@@ -88,9 +88,9 @@ def code_key(control: bytes, area: bytes) -> int:
 
 
 def translator_stamp(vk_dir: str = None) -> str:
-    """Mirror of the HOOKSHOT_SHADER_STAMP block (nx2/build.py:693-699)."""
+    """Mirror of the LONGSHOT_SHADER_STAMP block (nx2/build.py:693-699)."""
     vk = vk_dir or os.path.join(ROOT, "gpu", "vk")
-    stamp = hashlib.sha1()
+    stamp = hashlib.sha1(usedforsecurity=False)
     translator = [os.path.join(d, f) for top in ("eden", "sirit", "compat")
                   for d, _, fs in os.walk(os.path.join(vk, top)) for f in fs]
     names = sorted(translator) + [os.path.join(vk, n) for n in
@@ -221,7 +221,7 @@ def bake_seed(seed_path: str, bank_dir: str, max_pipelines: int = 8,
     os.makedirs(bank_dir, exist_ok=True)
     stages, programs = parse_seed(seed_path)
     with open(seed_path, "rb") as f:
-        seed_sha = hashlib.sha1(f.read()).hexdigest()
+        seed_sha = hashlib.sha1(f.read(), usedforsecurity=False).hexdigest()
     stamp = translator_stamp()
     manifest_path = os.path.join(bank_dir, "bake_bank.json")
     done = set()
@@ -278,7 +278,7 @@ def translate_seed(seed_path: str, bank_dir: str, tool_dir: str = None,
     toolchain is missing (callers may downgrade to a skip)."""
     sys.path.insert(0, HERE)
     import bake_mimo  # noqa: E402  (adopted; kept verbatim, do not edit)
-    if not os.environ.get("HOOKSHOT_SPIRV_HEADERS"):
+    if not os.environ.get("LONGSHOT_SPIRV_HEADERS"):
         # The in-tree headers live at <repo>/buildext/cpm (symlinked CPM
         # cache); nx2/bake_mimo.spirv_headers probes it, but default the env
         # too so direct shaderbatch builds find it. Explicit env still wins.
@@ -288,7 +288,7 @@ def translate_seed(seed_path: str, bank_dir: str, tool_dir: str = None,
             inc = os.path.join(in_tree, vers[-1], "include") if vers else None
             if inc and os.path.isfile(
                     os.path.join(inc, "spirv", "unified1", "spirv.hpp11")):
-                os.environ["HOOKSHOT_SPIRV_HEADERS"] = inc
+                os.environ["LONGSHOT_SPIRV_HEADERS"] = inc
     tool_dir = tool_dir or os.path.join(bank_dir, "tool")
     os.makedirs(tool_dir, exist_ok=True)
     tr = bake_mimo.run_tool(tool_dir, seed=seed_path, limit=limit, jobs=jobs)
@@ -346,7 +346,7 @@ def verify_bank(bank_dir: str, strict: bool = False):
     reports (gpu/vk/vk_main.cpp:253,256,360 — f12 chained into
     VkDeviceCreateInfo, never cleared), which includes
     uniformBufferStandardLayout, and CI validates the back end's own modules
-    the same way (.github/workflows/source-regressions.yml:147-148). Strict
+    the same way (.forgejo/workflows/ci.yml). Strict
     (no-flag) validity is NOT the gate; --strict additionally records the
     strict count for information only. Returns (summary, ok). Writes
     verify.json next to the manifest."""
@@ -369,7 +369,7 @@ def verify_bank(bank_dir: str, strict: bool = False):
         # else fall back to presence of the recorded sha.
         if seed and os.path.isfile(seed):
             with open(seed, "rb") as f:
-                summary["seed_ok"] = hashlib.sha1(f.read()).hexdigest() == \
+                summary["seed_ok"] = hashlib.sha1(f.read(), usedforsecurity=False).hexdigest() == \
                     manifest.get("seed_sha")
         else:
             summary["seed_ok"] = bool(manifest.get("seed_sha"))

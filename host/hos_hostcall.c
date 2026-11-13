@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
+#endif
 
 #define HOS_HOSTCALL_BASE 0x06000000ULL
 #define HOS_HOSTCALL_MAX 8192
@@ -58,7 +61,7 @@ A64Fn a64_lookup_host(uint64_t addr) {
     const uint64_t i = (addr - HOS_HOSTCALL_BASE) / 16;
     if (i >= (uint64_t)ncalls || calls[i].user) return NULL;
     static int slow = -1;
-    if (slow < 0) slow = getenv("HOS_HOSTCALL_STATS") != NULL || hos_trace || getenv("HOS_HOSTCALL_SLOW") != NULL;
+    if (slow < 0) slow = env_on("HOS_HOSTCALL_STATS") || hos_trace || env_on("HOS_HOSTCALL_SLOW");
     return slow ? NULL : (A64Fn)(void *)calls[i].fn;
 }
 
@@ -70,11 +73,11 @@ static volatile LONG ring_pos;
 
 void hos_setjmp_return(Ctx *c, uint64_t target);   /* hos_setjmp.c: a longjmp's BR to a setjmp site */
 int a64_call_miss(Ctx *c, uint64_t target) {
-    hos_setjmp_return(c, target);   /* (hookshot; does not return when it is one) */
+    hos_setjmp_return(c, target);   /* (longshot; does not return when it is one) */
     if (!target) {
-        /* (hookshot) a callback table entry zeroed at run time: OoT's UpdateTextBoxTextureThread reaches its text release trampoline
+        /* (longshot) a callback table entry zeroed at run time: OoT's UpdateTextBoxTextureThread reaches its text release trampoline
            with a null function pointer at the same cutscene point every session. 0 is never a real function; returning 1 turns the
-           tail call into a plain return. chrispository, Hookshot PR 55 */
+           tail call into a plain return. chrispository, Longshot PR 55 */
         static volatile LONG logged;
         if (InterlockedIncrement(&logged) <= 8)
             hos_log("skipped an indirect call to 0 (lr %#llx, thread %s)", (unsigned long long)c->x[30], hos_thread_name(hos_self()));
@@ -87,7 +90,7 @@ int a64_call_miss(Ctx *c, uint64_t target) {
     /* (the ring and the counts only for HOS_HOSTCALL_STATS / tracing: every NVN call took two interlocked increments
        on lines all game threads share) */
     static int stats = -1;
-    if (stats < 0) stats = getenv("HOS_HOSTCALL_STATS") != NULL || hos_trace;
+    if (stats < 0) stats = env_on("HOS_HOSTCALL_STATS") || hos_trace;
     if (!stats) {
         h->fn(c, h->user);
         return 1;
@@ -117,7 +120,7 @@ uint64_t hos_call_guest(Ctx *c, uint64_t fn, uint64_t a0, uint64_t a1, uint64_t 
 
 /* HOS_HOSTCALL_STATS=1: at exit, how often each host call ran (the NVN surface a game really uses). */
 void hos_hostcall_stats(void) {
-    if (!getenv("HOS_HOSTCALL_STATS")) return;
+    if (!env_on("HOS_HOSTCALL_STATS")) return;
     fprintf(stderr, "[hos] host calls:\n");
     for (LONG i = 0; i < ncalls; i++) fprintf(stderr, "  %10ld  %s\n", calls[i].calls, calls[i].name);
     LONG end = ring_pos, start = end > RING ? end - RING : 0;

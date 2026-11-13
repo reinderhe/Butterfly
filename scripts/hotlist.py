@@ -1,5 +1,5 @@
 """Hot lifted functions from an all-thread sample (HOS_SAMPLE_ALL, scripts/crit.py): for each sample of a game thread
-running in hookshot.exe (on Linux hookshot), the innermost lifted function (f_...) is charged. Writes the functions that make up the
+running in longshot.exe (on Linux longshot), the innermost lifted function (f_...) is charged. Writes the functions that make up the
 first <share> of those samples, hottest first, one a line, for the lift's A64_HOT_FUNCS (their FP ops call the
 helpers' inline fast paths; with A64_HOT_CHUNK=1 they are compiled together in code_hot.c).
 
@@ -13,7 +13,7 @@ import prof  # noqa: E402
 maps = prof.load_symbols()
 game = next((m for m in prof.GAME_MODS if m in maps), None)
 if not game:
-    sys.exit("no hookshot.map (Windows) or hookshot binary (Linux) in %s: set RX_MAPS" % os.environ.get("RX_MAPS", prof.BUILD))
+    sys.exit("no longshot.map (Windows) or longshot binary (Linux) in %s: set RX_MAPS" % os.environ.get("RX_MAPS", prof.BUILD))
 addrs, names = maps[game]
 share = float(sys.argv[3]) if len(sys.argv) > 3 else 0.85
 cap = int(sys.argv[4]) if len(sys.argv) > 4 else 1500

@@ -3,7 +3,8 @@
    <mods> is the "mods" folder beside the executable, or HOS_MODS=<dir>. A mod may sit deeper, as emulators keep them
    (<mods>/contents/<title id>/<name>/romfs): any folder holding a romfs or exefs folder is a mod. Folders whose names
    start with '-' or '_' are left out (off). When two mods have the same file, the one whose path sorts last wins (name
-   them 01-..., 02-... to order them).
+   them 01-..., 02-... to order them). The resource size table that wins gets the button prompts' entries merged into it
+   (prompts.c), so the prompts' larger files still fit.
    Every mod file is indexed once at the start (no disk lookups per open); nn_fs.c asks hos_mods_romfs for each rom:
    path and lists a folder's mod-only entries with the game's own (hos_mods_dir_extras). HOS_FS_OVERLAY (nn_fs.c) is
    looked at after this, so a test overlay wins over mods.
@@ -69,8 +70,8 @@ static void put(const char *key, const char *host, uint64_t size, int is_dir) {
 
 /* a mod's romfs folder, recursively: rel is the path inside the RomFS so far ("" at its root) */
 static int index_romfs(const char *host_dir, const char *rel, int depth) {
-    if (depth > 32) return 0;   /* (hookshot: no RomFS is this deep) */
-    if (!depth) {   /* (hookshot) the romfs folder itself a link (to / in a mod's archive): the walk covered the whole disk */
+    if (depth > 32) return 0;   /* (longshot: no RomFS is this deep) */
+    if (!depth) {   /* (longshot) the romfs folder itself a link (to / in a mod's archive): the walk covered the whole disk */
         const DWORD at = GetFileAttributesA(host_dir);
         if (at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_REPARSE_POINT)) {
             hos_log("mods: %s is a link to a folder: left out", host_dir);
@@ -87,7 +88,7 @@ static int index_romfs(const char *host_dir, const char *rel, int depth) {
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
         char host[MAX_PATH], key[MAX_PATH];
         snprintf(host, sizeof host, "%s\\%s", host_dir, fd.cFileName);
-        /* (hookshot) a link to a folder is not followed (two links back up made the walk endless); links to files are
+        /* (longshot) a link to a folder is not followed (two links back up made the walk endless); links to files are
            (mod managers place files as links) */
         if ((fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
             hos_log("mods: %s is a link to a folder: left out", host);
@@ -183,25 +184,27 @@ int hos_mods_romfs(const char *rel, char *out, size_t cap) {
     char key[MAX_PATH];
     snprintf(key, sizeof key, "%s", rel);
     lower_slash(key);
-    int hos_prompts_romfs(const char *key, char *out, size_t cap);   /* prompts.c: the button prompts, where no mod has the file */
+    int hos_prompts_romfs(const char *key, const char *mod, char *out, size_t cap);   /* prompts.c: the button prompts */
     Entry *e = table_n ? find(key) : NULL;
-    if (!e || e->is_dir) return hos_prompts_romfs(key, out, cap);
-    snprintf(out, cap, "%s", e->host);
+    if (!e || e->is_dir) return hos_prompts_romfs(key, NULL, out, cap);
+    const int merged = hos_prompts_romfs(key, e->host, out, cap);   /* (the size table: the prompts' entries merged in) */
+    if (!merged) snprintf(out, cap, "%s", e->host);
     static volatile LONG logged;
-    if (!e->logged && InterlockedIncrement(&logged) <= 200) hos_log("mods: %s <- %s", rel, e->host);
+    if (!e->logged && InterlockedIncrement(&logged) <= 200)
+        hos_log("mods: %s <- %s%s", rel, e->host, merged ? " (with the button prompts' sizes merged in)" : "");
     e->logged = 1;
     return 1;
 }
 
-/* prompts.c: 1 when a mod has a file whose key (lower case, '/') starts with prefix and ends with suffix */
-int hos_mods_has(const char *prefix, const char *suffix) {
-    const size_t pn = strlen(prefix), sn = strlen(suffix);
-    for (size_t i = 0; i < table_cap; i++) {
-        const char *k = table[i].key;
-        const size_t kn = k ? strlen(k) : 0;
-        if (k && !table[i].is_dir && kn >= pn + sn && !strncmp(k, prefix, pn) && !strcmp(k + kn - sn, suffix)) return 1;
-    }
-    return 0;
+/* prompts.c: the mod file for this exact RomFS path, before the prompts' replacements */
+int hos_mods_file(const char *rel, char *out, size_t cap) {
+    char key[MAX_PATH];
+    snprintf(key, sizeof key, "%s", rel);
+    lower_slash(key);
+    const Entry *e = table_n ? find(key) : NULL;
+    if (!e || e->is_dir) return 0;
+    snprintf(out, cap, "%s", e->host);
+    return 1;
 }
 
 /* nn_fs.c, listing a RomFS folder: fn(arg, name, is_dir, size) for each mod entry directly in it that the game's own

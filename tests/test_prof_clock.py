@@ -28,7 +28,7 @@ def main():
     source = (ROOT / "gpu" / "vk" / "vk_internal.h").read_text(encoding="utf-8")
     fn = block(source, "inline int64_t perf_ticks_to_ns(")
     clock = block(source, "inline int64_t prof_now()")
-    if "return (int64_t)((double)HOOKSHOT_RDTSC() * scale.ns_per);" not in clock:
+    if "return (int64_t)((double)LONGSHOT_RDTSC() * scale.ns_per);" not in clock:
         raise SystemExit("prof_now still reads the performance counter on the hot path")
     fixture = f'''#include <cstdint>
 #include <cstdio>
@@ -37,8 +37,8 @@ def main():
 struct LARGE_INTEGER {{ long long QuadPart; }};
 static inline void QueryPerformanceCounter(LARGE_INTEGER* t) {{ t->QuadPart = 1; }}
 static inline void QueryPerformanceFrequency(LARGE_INTEGER* t) {{ t->QuadPart = 1000000000LL; }}
-#define HOOKSHOT_RDTSC() (0ull)
-#define HOOKSHOT_PAUSE() ((void)0)
+#define LONGSHOT_RDTSC() (0ull)
+#define LONGSHOT_PAUSE() ((void)0)
 {fn}
 {clock}
 int main() {{

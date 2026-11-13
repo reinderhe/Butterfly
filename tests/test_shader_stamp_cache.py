@@ -21,7 +21,7 @@ BUILD_SCRIPT = ROOT / "nx2" / "build.py"
 
 def production_code(path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    names = {"tree_headers", "vk_sources", "flag_text", "object_key"}
+    names = {"tree_headers", "vk_sources", "flag_text", "object_key", "zstd_jobs"}
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
     assert {n.name for n in functions} == names
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -37,7 +37,7 @@ def production_code(path):
 
 class ShaderStampCacheTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="hookshot-shader-stamp-")
+        self.temp = tempfile.TemporaryDirectory(prefix="longshot-shader-stamp-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.files = {
@@ -82,6 +82,9 @@ class ShaderStampCacheTests(unittest.TestCase):
             "third_party/zstd/lib/decompress/zstd_ddict.c": "int z8;\n",
             "third_party/zstd/lib/decompress/zstd_decompress.c": "int z9;\n",
             "third_party/zstd/lib/decompress/zstd_decompress_block.c": "int z10;\n",
+            "third_party/zbic/zstd.c": "int zstd_zbic;\n",
+            "third_party/zbic/zstd.h": "int zstd_zbic_h;\n",
+            "third_party/zbic/zstd_errors.h": "int zstd_zbic_errors;\n",
         }
         for name, text in self.files.items():
             path = self.root / name
@@ -101,15 +104,15 @@ class ShaderStampCacheTests(unittest.TestCase):
             "spirv_headers": str(self.root / "deps/spirv-headers"),
             "vk_headers": str(self.root / "deps/vulkanheaders"),
             "vma_headers": str(self.root / "deps/vulkanmemoryallocator"),
-            "obj_dir": str(self.root / "obj"), "cc": "clang", "jobs": [],
-            "stamp_def": '-DHOOKSHOT_VERSION="%s"' % version, "logo_text": b"", "gen_dir": str(self.root / "gen"),
+            "obj_dir": str(self.root / "obj"), "cc": "clang", "jobs": [], "ZSTD": str(self.root / "third_party/zstd/lib"),
+            "stamp_def": '-DLONGSHOT_VERSION="%s"' % version, "logo_text": b"", "gen_dir": str(self.root / "gen"),
             "fonts_cpp": str(self.root / "gen/ui_fonts.cpp"),
             # (the back end's branch makes its logo header and fonts file itself since #1567: no files written here)
             "logo_rgba": SimpleNamespace(write=lambda path: ""),
             "ui_fonts": SimpleNamespace(write=lambda path: None),
             "NGX_SDK": ngx,   # ("": no NVIDIA NGX SDK, vk_dlss.cpp built without DLSS, as by default)
             "NGX_MSVC_RT": "vk_ngx_msvc_rt.cpp",
-            "FSR": fsr,   # (HOOKSHOT_FSR=1: vk_fsr4.cpp built with AMD FSR 4)
+            "FSR": fsr,   # (LONGSHOT_FSR=1: vk_fsr4.cpp built with AMD FSR 4)
         }
         with mock.patch.dict(os.environ, {"RX_RELEASE": "1"} if release else {}, clear=True), warnings.catch_warnings():
             # The production key/header helpers use short-lived open(...).read() expressions.
@@ -161,7 +164,7 @@ class ShaderStampCacheTests(unittest.TestCase):
                 before = self.jobs(linux)
                 path.write_bytes(b"struct IR { int changed; };\n")
                 # (Dear ImGui's objects and zstd's see only their own headers; the fonts' file none)
-                expected = {name for name in before if not name.startswith(("host/posix/", "third_party/imgui/", "third_party/zstd/", "gen/"))}
+                expected = {name for name in before if not name.startswith(("host/posix/", "third_party/imgui/", "third_party/zstd/", "third_party/zbic/", "gen/"))}
                 self.assertEqual(self.changed(before, self.jobs(linux)), expected)
 
     def test_stamp_line_ending_normalization_is_unchanged(self):
@@ -178,12 +181,12 @@ class ShaderStampCacheTests(unittest.TestCase):
             with self.subTest(linux=linux):
                 before = self.jobs(linux, release=True)
                 for name, job in before.items():
-                    shader = [f for f in job["flags"] if f.startswith("-DHOOKSHOT_SHADER_STAMP=")]
-                    version = [f for f in job["flags"] if f.startswith("-DHOOKSHOT_VERSION=")]
+                    shader = [f for f in job["flags"] if f.startswith("-DLONGSHOT_SHADER_STAMP=")]
+                    version = [f for f in job["flags"] if f.startswith("-DLONGSHOT_VERSION=")]
                     self.assertEqual(len(shader), int(name == "gpu/vk/vk_shader.cpp"))
                     self.assertEqual(len(version), int(name == "gpu/vk/vk_menu.cpp"))
-                    if not name.startswith(("host/posix/", "third_party/zstd/", "gen/")):   # (plain C libraries, the fonts' bytes)
-                        self.assertIn("-DHOOKSHOT_RELEASE", job["flags"])
+                    if not name.startswith(("host/posix/", "third_party/zstd/", "third_party/zbic/", "gen/")):   # (plain C libraries, the fonts' bytes)
+                        self.assertIn("-DLONGSHOT_RELEASE", job["flags"])
                 self.assertEqual(self.changed(before, self.jobs(linux, version="new", release=True)),
                                  {"gpu/vk/vk_menu.cpp"})
 
@@ -194,13 +197,13 @@ class ShaderStampCacheTests(unittest.TestCase):
                 plain = self.jobs(linux, mingw=mingw)
                 self.assertNotIn("gpu/vk/vk_ngx_msvc_rt.cpp", plain)   # (never without the SDK)
                 self.assertNotIn("host/mingw_msvc_shims.c", plain)
-                self.assertFalse([n for n, j in plain.items() if "-DHOOKSHOT_NGX" in j["flags"]])
+                self.assertFalse([n for n, j in plain.items() if "-DLONGSHOT_NGX" in j["flags"]])
                 with mock.patch("builtins.print"):
                     ngx = self.jobs(linux, ngx=sdk, mingw=mingw)
                 shims = {"gpu/vk/vk_ngx_msvc_rt.cpp", "host/mingw_msvc_shims.c"}
-                # (the shims only for llvm-mingw: the MSVC build (HOOKSHOT_MSVC=1) and Linux have their own runtime)
+                # (the shims only for llvm-mingw: the MSVC build (LONGSHOT_MSVC=1) and Linux have their own runtime)
                 self.assertEqual(set(ngx) - set(plain), shims if mingw and not linux else set())
-                self.assertEqual({n for n, j in ngx.items() if "-DHOOKSHOT_NGX" in j["flags"]},
+                self.assertEqual({n for n, j in ngx.items() if "-DLONGSHOT_NGX" in j["flags"]},
                                  {"gpu/vk/vk_dlss.cpp"} | ({"gpu/vk/vk_ngx_msvc_rt.cpp"} if mingw and not linux else set()))
                 self.assertEqual(self.changed(plain, {n: ngx[n] for n in plain}), {"gpu/vk/vk_dlss.cpp"})
 
@@ -208,16 +211,16 @@ class ShaderStampCacheTests(unittest.TestCase):
         for linux in (False, True):
             with self.subTest(linux=linux):
                 plain = self.jobs(linux)
-                self.assertFalse([n for n, j in plain.items() if "-DHOOKSHOT_FSR" in j["flags"]])
+                self.assertFalse([n for n, j in plain.items() if "-DLONGSHOT_FSR" in j["flags"]])
                 with mock.patch("builtins.print"):
                     fsr = self.jobs(linux, fsr=True)
                 self.assertEqual(set(fsr), set(plain))   # (no other files: AMD's headers alone, nothing linked)
-                self.assertEqual({n for n, j in fsr.items() if "-DHOOKSHOT_FSR" in j["flags"]}, {"gpu/vk/vk_fsr4.cpp"})
+                self.assertEqual({n for n, j in fsr.items() if "-DLONGSHOT_FSR" in j["flags"]}, {"gpu/vk/vk_fsr4.cpp"})
                 self.assertEqual(self.changed(plain, fsr), {"gpu/vk/vk_fsr4.cpp"})
 
 
 class NgxSdkTests(unittest.TestCase):
-    """nx2/build.py's HOOKSHOT_NGX_SDK: which library each platform needs, and what the Windows link adds"""
+    """nx2/build.py's LONGSHOT_NGX_SDK: which library each platform needs, and what the Windows link adds"""
     def setUp(self):
         tree = ast.parse(BUILD_SCRIPT.read_text(encoding="utf-8"), filename=str(BUILD_SCRIPT))
         names = {"ngx_library", "ngx_sdk", "ngx_link"}
@@ -225,7 +228,7 @@ class NgxSdkTests(unittest.TestCase):
         self.assertEqual({n.name for n in functions}, names)
         self.ns = {"os": os}
         exec(compile(ast.Module(body=functions, type_ignores=[]), str(BUILD_SCRIPT), "exec"), self.ns)
-        self.temp = tempfile.TemporaryDirectory(prefix="hookshot-ngx-")
+        self.temp = tempfile.TemporaryDirectory(prefix="longshot-ngx-")
         self.addCleanup(self.temp.cleanup)
         self.sdk = Path(self.temp.name)
         (self.sdk / "lib").mkdir()

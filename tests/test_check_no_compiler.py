@@ -18,8 +18,8 @@ def main():
         env = dict(os.environ)
         env["PATH"] = d                   # (no clang on PATH)
         env["EMSDK"] = d                  # (an emsdk folder that holds none)
-        env["HOOKSHOT_MSVC"] = "1"        # (the Visual Studio route: no tools/llvm-mingw either)
-        env.pop("HOOKSHOT_MINGW", None)
+        env["LONGSHOT_MSVC"] = "1"        # (the Visual Studio route: no tools/llvm-mingw either)
+        env.pop("LONGSHOT_MINGW", None)
         r = subprocess.run([sys.executable, "-I", "-B", str(ROOT / "nx2" / "make_game.py"), "--check", "--nup",
                             str(ROOT / "no-such-game.nup"), "--work", str(Path(d) / "work")],
                            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)

@@ -1,0 +1,31 @@
+#!/bin/sh
+# The game folder's launcher, what longshot.exe is on Windows. The game itself is bin/longshot. This file is copied to
+# longshot in the folder (nx2/make_game.py).
+#
+# It starts the builder= line in longshot_version.txt (what made this game: the Longshot Launcher, or the builder AppImage
+# for a build with --cli, which plays it) with --launch <this folder>. When that one is gone, it starts the game.
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+builder_line() {
+    [ -f "$HERE/longshot_version.txt" ] || return 1
+    path=
+    while IFS= read -r line || [ -n "$line" ]; do
+        case $line in
+            builder=*) path=${line#builder=} ;;
+        esac
+    done < "$HERE/longshot_version.txt"
+    [ -n "$path" ] && [ -x "$path" ] || return 1
+    printf '%s\n' "$path"
+}
+
+run=$(builder_line || true)
+if [ -n "$run" ]; then
+    exec "$run" --launch "$HERE"
+fi
+if [ -x "$HERE/bin/longshot" ]; then
+    cd "$HERE"
+    exec ./bin/longshot
+fi
+echo "Longshot: the game (bin/longshot) is missing from this folder. Build it again with the Longshot Launcher." >&2
+exit 1

@@ -1,4 +1,4 @@
-// (hookshot) AMD FSR 3.1's camera, from the scene's own projection: plain functions, no Vulkan. tests/test_fsr3_math.cpp
+// (longshot) AMD FSR 3.1's camera, from the scene's own projection: plain functions, no Vulkan. tests/test_fsr3_math.cpp
 // checks them.
 //
 // FSR 3.1's passes (the upscaler's and frame interpolation's) turn a depth into a view distance with four factors,

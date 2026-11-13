@@ -40,7 +40,7 @@ def main():
         common = vk / "common.h"
         common.write_text("// authored backend header\n", encoding="utf-8")
         src = vk / "vk_dlss.cpp"
-        src.write_text("#ifdef HOOKSHOT_NGX\n#include <authored_ngx.h>\n#else\n#define SDK_VALUE 3\n#endif\n"
+        src.write_text("#ifdef LONGSHOT_NGX\n#include <authored_ngx.h>\n#else\n#define SDK_VALUE 3\n#endif\n"
                        "int main() { return SDK_VALUE; }\n", encoding="utf-8")
         other = vk / "vk_other.cpp"
         other.write_text("// unrelated backend source\n", encoding="utf-8")

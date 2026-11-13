@@ -146,7 +146,7 @@ void TranslatorVisitor::ISBE_nx2(u64 insn) {
     }
     const IR::U32 address{ir.IAdd(X(isbe.address_reg), ir.Imm32(static_cast<u32>(isbe.offset)))};
     if (isbe.write == 0) {
-        // (hookshot) .O: the program reads back its own output region (a task's payload, a mesh's attributes)
+        // (longshot) .O: the program reads back its own output region (a task's payload, a mesh's attributes)
         X(isbe.reg, isbe.output != 0 ? ir.IsbeReadOutput(address) : ir.IsbeRead(address));
         return;
     }

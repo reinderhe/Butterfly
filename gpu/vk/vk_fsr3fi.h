@@ -1,4 +1,4 @@
-// (hookshot) AMD FSR 3.1 frame interpolation, and the optical flow it runs on, recorded as our own Vulkan compute passes:
+// (longshot) AMD FSR 3.1 frame interpolation, and the optical flow it runs on, recorded as our own Vulkan compute passes:
 // the made frame between two of the game's when the Frame generation row is 2x.
 //
 // The renderer already makes frames: vk_framegen.cpp interpolates between the last two presented frames from colour alone.
@@ -29,7 +29,7 @@ namespace mkwvk::fsr3fi {
 /// is given: the frame before it is kept here, because the interpolation needs both ends of the interval and the present
 /// path only ever hands over the newest one. The depth (reversed) and the motion are the scene's at the render size
 /// (vk_fsr3_inputs.h), with `motion_scale` taking a vector to render pixels, as the SDK's
-/// FFX_FRAMEINTERPOLATION_OPTION_LOW_RESOLUTION_MOTION_VECTORS permutation the vendored GLSL was compiled under expects.
+/// FFX_FRAMEINTERPOLATION_OPTION_LOW_RES_MOTION_VECTORS permutation the vendored GLSL was compiled under expects.
 struct Inputs {
     VkImageView color = VK_NULL_HANDLE;
     VkImage color_image = VK_NULL_HANDLE;

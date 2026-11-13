@@ -8,7 +8,7 @@
      signal's context and unwinds from there with libgcc's unwinder (the .eh_frame clang writes), the sampler waits;
    - breakpoints with perf_event_open (PERF_TYPE_BREAKPOINT, sigtrap=1: a SIGTRAP in the thread that touched the
      address, si_code TRAP_PERF), allowed on our own threads at the default perf_event_paranoid (2).
-   Frames are written as <module>+<offset from its load base>: hookshot and hookshot_vk.so,
+   Frames are written as <module>+<offset from its load base>: longshot and longshot_vk.so,
    offsets as in their linker maps (position-independent, based at 0). */
 #include "../hos.h"
 #include <dirent.h>
@@ -230,7 +230,7 @@ static int module_of(uintptr_t pc, uintptr_t *base) {
     for (int i = 0; i < nmods; i++)
         if (mods[i].base == *base) return i;
     if (nmods >= 64) return -1;
-    const char *n = d.dli_fname && d.dli_fname[0] ? d.dli_fname : "hookshot";
+    const char *n = d.dli_fname && d.dli_fname[0] ? d.dli_fname : "longshot";
     const char *b = strrchr(n, '/');
     mods[nmods].base = *base;
     snprintf(mods[nmods].name, sizeof mods[nmods].name, "%s", b ? b + 1 : n);
@@ -335,6 +335,9 @@ static DWORD WINAPI sample_all_thread(void *p) {
     int nt = 0;
     int64_t t0 = 0;
     const int self = (int)syscall(SYS_gettid);
+    /* (with HOS_CHAIN: "# at <ns>" before each sample, when it was taken: the threads are sampled one after another, a
+       millisecond or more apart, and scripts/chain.py lays the samples on its exact path) */
+    const int at = getenv("HOS_CHAIN") != NULL;
     for (;;) {
         if (access(go, F_OK)) {
             if (out) { fclose(out); out = NULL; hos_log("prof: all-thread sampling stopped"); }
@@ -355,6 +358,7 @@ static DWORD WINAPI sample_all_thread(void *p) {
                 nt++;
             }
             t0 = hos_now_ns();
+            fprintf(out, "# t0_ns %lld\n", (long long)t0);   /* (the clock of HOS_CHAIN's records: scripts/chain.py) */
             hos_log("prof: all-thread sampling of %d threads into %s", nt, path);
         }
         Sleep(2);
@@ -363,6 +367,7 @@ static DWORD WINAPI sample_all_thread(void *p) {
             uintptr_t pcs[16];
             const int n = sample_one(th[i], pcs, 16);
             if (n < 0) continue;
+            if (at) fprintf(out, "# at %lld\n", (long long)hos_now_ns());
             char line[1024];
             int len = snprintf(line, sizeof line, "%ld %s|", ms, tn[i]);
             for (int depth = 0; depth < n && len < (int)sizeof line - 96; depth++) {

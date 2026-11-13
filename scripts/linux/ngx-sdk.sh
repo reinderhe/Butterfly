@@ -1,11 +1,11 @@
 #!/bin/bash
-# ngx-sdk.sh: NVIDIA's DLSS SDK files for a local Linux build with NVIDIA DLSS (HOOKSHOT_NGX_SDK): scripts/ngx_sdk.py, which
+# ngx-sdk.sh: NVIDIA's DLSS SDK files for a local Linux build with NVIDIA DLSS (LONGSHOT_NGX_SDK): scripts/ngx_sdk.py, which
 # says what it fetches and asks for NVIDIA's license (--accept-nvidia-license: accepted without the question).
 #
 # Usage: scripts/linux/ngx-sdk.sh [--accept-nvidia-license] [<sdk folder>] [<runtime folder>]
-#   <sdk folder>: default build-linux/ngx-sdk; <runtime folder>: libnvidia-ngx-dlss.so copied there too (a game folder's
-#   ngx/, or $XDG_DATA_HOME/hookshot/ngx; RX_VK_DLSS_DIR names another)
-# Then build with HOOKSHOT_NGX_SDK=<sdk folder>.
+#   <sdk folder>: default build-linux/ngx-sdk; <runtime folder>: libnvidia-ngx-dlss.so and libnvidia-ngx-dlssg.so copied
+#   there too (a game folder's ngx/, or $XDG_DATA_HOME/longshot/ngx; RX_VK_DLSS_DIR names another)
+# Then build with LONGSHOT_NGX_SDK=<sdk folder>.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 accept=()

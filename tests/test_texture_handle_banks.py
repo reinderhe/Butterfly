@@ -111,11 +111,13 @@ int main() {
  return failures?1:0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='hookshot-bank-reader-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='longshot-bank-reader-') as tmp:
         src = Path(tmp) / 'check.cpp'
         exe = Path(tmp) / ('check.exe' if os.name == 'nt' else 'check')
         src.write_text(prelude + extracted + checks, encoding='utf-8')
-        subprocess.run([a.cxx, '-std=c++20', '-Wall', '-Wextra', '-Werror', str(src), '-o', str(exe)], check=True, timeout=60)
+        env_on_h = str(a.source_root / 'gpu' / 'vk' / 'compat' / 'longshot_env.h')   # (env_on: RX_VK_HANDLES_LIVE)
+        subprocess.run([a.cxx, '-std=c++20', '-include', env_on_h, '-Wall', '-Wextra', '-Werror', str(src), '-o', str(exe)],
+                       check=True, timeout=60)
         for live in (False, True):
             env = os.environ.copy()
             env.pop('RX_VK_HANDLES_LIVE', None)

@@ -86,7 +86,7 @@ def require_toolchain(case):
     except SystemExit as e:
         case.skipTest("no usable C++ compiler: %s" % e)
     if not bake_mimo.spirv_headers():
-        case.skipTest("no SPIR-V headers (HOOKSHOT_SPIRV_HEADERS or a CPM "
+        case.skipTest("no SPIR-V headers (LONGSHOT_SPIRV_HEADERS or a CPM "
                        "cache): only the miner could run")
 
 
@@ -128,7 +128,7 @@ class BakeSkeletonTests(unittest.TestCase):
 
     def test_bake_end_to_end(self):
         with tempfile.TemporaryDirectory(prefix="bake-skel-") as tmp:
-            seed = os.path.join(tmp, "hookshot_shaders.bin")
+            seed = os.path.join(tmp, "longshot_shaders.bin")
             synthetic_seed(seed)
             bank = os.path.join(tmp, "bank")
             path, stats = bake.bake_seed(seed, bank)
@@ -164,7 +164,7 @@ class BakeSkeletonTests(unittest.TestCase):
 
     def test_cli_bake(self):
         with tempfile.TemporaryDirectory(prefix="bake-cli-") as tmp:
-            seed = os.path.join(tmp, "hookshot_shaders.bin")
+            seed = os.path.join(tmp, "longshot_shaders.bin")
             synthetic_seed(seed)
             bank = os.path.join(tmp, "bank")
             r = subprocess.run(
@@ -218,7 +218,7 @@ class BakeTranslateTests(unittest.TestCase):
     def test_translate_exact_keys_and_spirv(self):
         require_toolchain(self)
         with tempfile.TemporaryDirectory(prefix="bake-sb-") as tmp:
-            seed = os.path.join(tmp, "hookshot_shaders.bin")
+            seed = os.path.join(tmp, "longshot_shaders.bin")
             self.real_seed(seed)
             bank = os.path.join(tmp, "bank")
             bake.bake_seed(seed, bank)
@@ -249,7 +249,7 @@ class BakeTranslateTests(unittest.TestCase):
 
 
 class BakeStampTrapTests(unittest.TestCase):
-    """BAKE.md s6 trap 1: build.py hashes sorted(translator) + the four
+    """docs/BAKE.md s6 trap 1: build.py hashes sorted(translator) + the four
     named files APPENDED, not merged. My translator_stamp must follow the
     appended order; this fails if someone 'simplifies' it into one sort."""
 
@@ -278,7 +278,7 @@ class BakeVerifyTests(unittest.TestCase):
         require_toolchain(self)
         t = BakeTranslateTests()
         with tempfile.TemporaryDirectory(prefix="bake-verify-") as tmp:
-            seed = os.path.join(tmp, "hookshot_shaders.bin")
+            seed = os.path.join(tmp, "longshot_shaders.bin")
             t.real_seed(seed)
             bank = os.path.join(tmp, "bank")
             bake.bake_seed(seed, bank)
@@ -316,7 +316,7 @@ class BakeVerifyTests(unittest.TestCase):
         require_toolchain(self)
         t = BakeTranslateTests()
         with tempfile.TemporaryDirectory(prefix="bake-partial-") as tmp:
-            seed = os.path.join(tmp, "hookshot_shaders.bin")
+            seed = os.path.join(tmp, "longshot_shaders.bin")
             t.real_seed(seed)
             bank = os.path.join(tmp, "bank")
             bake.bake_seed(seed, bank)

@@ -1,5 +1,5 @@
 /* (linux) The Win32 calls of host/posix/windows.h, on POSIX. Built into the executable and, on its own, into
-   hookshot_vk.so (each its own copy, -Bsymbolic: the executable exports nothing of it). */
+   longshot_vk.so (each its own copy, -Bsymbolic: the executable exports nothing of it). */
 #define _GNU_SOURCE
 #include <windows.h>
 #include <mmsystem.h>
@@ -229,7 +229,7 @@ HANDLE CreateThread(void *attr, SIZE_T stack, LPTHREAD_START_ROUTINE fn, void *a
     t->fn = fn, t->arg = arg, t->refs = 2;   /* (the handle's and the thread's own) */
     pthread_attr_t a;
     pthread_attr_init(&a);
-    /* (Windows' default is the executable's: 8 MB here, as hookshot.exe's /stack; guest threads ask 64 MB) */
+    /* (Windows' default is the executable's: 8 MB here, as longshot.exe's /stack; guest threads ask 64 MB) */
     pthread_attr_setstacksize(&a, stack ? (stack + 0xFFFF) & ~(SIZE_T)0xFFFF : (8u << 20));
     pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     if (flags & CREATE_SUSPENDED) fprintf(stderr, "[win32] CreateThread: CREATE_SUSPENDED is not supported: started at once\n");
@@ -954,7 +954,7 @@ DWORD GetFileAttributesA(LPCSTR name) {
         return INVALID_FILE_ATTRIBUTES;
     }
     DWORD at = S_ISDIR(st.st_mode) ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
-    struct stat link;   /* (hookshot: a symbolic link is marked as Windows marks one, a reparse point; find_next too) */
+    struct stat link;   /* (longshot: a symbolic link is marked as Windows marks one, a reparse point; find_next too) */
     if (lstat(path, &link) == 0 && S_ISLNK(link.st_mode)) at |= FILE_ATTRIBUTE_REPARSE_POINT;
     return at;
 }
@@ -1017,7 +1017,7 @@ static BOOL find_next(HFind *f, WIN32_FIND_DATAA *fd) {
         } else {
             fd->dwFileAttributes = e->d_type == DT_DIR ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
         }
-        struct stat link;   /* (hookshot: a symbolic link is marked as Windows marks one, a reparse point) */
+        struct stat link;   /* (longshot: a symbolic link is marked as Windows marks one, a reparse point) */
         if (lstat(full, &link) == 0 && S_ISLNK(link.st_mode)) fd->dwFileAttributes |= FILE_ATTRIBUTE_REPARSE_POINT;
         return TRUE;
     }
@@ -1243,12 +1243,12 @@ DWORD GetWindowThreadProcessId(HWND w, DWORD *pid) {
 }
 int MessageBoxA(HWND w, LPCSTR text, LPCSTR caption, UINT type) {
     (void)w, (void)type;
-    fprintf(stderr, "%s: %s\n", caption ? caption : "Hookshot", text ? text : "");
+    fprintf(stderr, "%s: %s\n", caption ? caption : "Longshot", text ? text : "");
     typedef int (*ShowFn)(uint32_t, const char *, const char *, void *);   /* (SDL3's and SDL2's alike; its result unread) */
     void *sdl = dlopen("libSDL3.so.0", RTLD_NOW | RTLD_NOLOAD);
     if (!sdl) sdl = dlopen("libSDL2-2.0.so.0", RTLD_NOW | RTLD_NOLOAD);
     ShowFn show = sdl ? (ShowFn)dlsym(sdl, "SDL_ShowSimpleMessageBox") : NULL;
-    if (show) show(0x10, caption ? caption : "Hookshot", text ? text : "", NULL);
+    if (show) show(0x10, caption ? caption : "Longshot", text ? text : "", NULL);
     return 1;
 }
 
@@ -1299,7 +1299,13 @@ MMRESULT waveOutWrite(HWAVEOUT hw, WAVEHDR *h, UINT size) {
     (void)size;
     WaveOut *w = (WaveOut *)hw;
     pthread_mutex_lock(&w->mu);
-    if (w->count == 64) { pthread_mutex_unlock(&w->mu); return MMSYSERR_ERROR; }
+    if (w->count >= 60) {
+        WAVEHDR *old = w->q[w->head];
+        __atomic_store_n(&old->dwFlags, (old->dwFlags & ~(DWORD)WHDR_INQUEUE) | WHDR_DONE, __ATOMIC_RELEASE);
+        w->head = (w->head + 1) % 64;
+        w->count--;
+        w->pos = 0;
+    }
     h->dwFlags = (h->dwFlags & ~(DWORD)WHDR_DONE) | WHDR_INQUEUE;
     w->q[(w->head + w->count) % 64] = h;
     w->count++;

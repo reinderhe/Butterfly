@@ -17,7 +17,7 @@
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/frontend/ir/basic_block.h"
 #include "shader_recompiler/frontend/ir/program.h"
-#include "shader_recompiler/backend/spirv/mma_layout.h"   // (hookshot)
+#include "shader_recompiler/backend/spirv/mma_layout.h"   // (longshot)
 
 namespace Shader::Backend::SPIRV {
 namespace {
@@ -112,11 +112,20 @@ void EmitInstOf(EmitContext& ctx, IR::Inst* inst) {
 }
 
 void EmitInst(EmitContext& ctx, IR::Inst* inst) {
-    // (hookshot) the emitters that are left unimplemented say only "SPIR-V Instruction": name the IR op
+    // (longshot) the emitters that are left unimplemented say only "SPIR-V Instruction": name the IR op
     try {
         EmitInstOf(ctx, inst);
     } catch (const NotImplementedException& e) {
         throw NotImplementedException("{} ({})", e.what(), IR::NameOf(inst->GetOpcode()));
+    } catch (const std::runtime_error& e) {   // (super build: sirit's null Id, named by the IR op that asked for it)
+        std::string args;
+        for (size_t i = 0; i < inst->NumArgs(); ++i) {
+            const IR::Value a{inst->Arg(i)};
+            args += a.IsImmediate() ? " imm" : a.IsEmpty() ? " empty" : a.IsIdentity() ? " identity"
+                  : (" " + std::string(IR::NameOf(a.InstRecursive()->GetOpcode())) +
+                     (a.InstRecursive()->Definition<Id>().value == 0 ? "(undefined)" : ""));
+        }
+        throw LogicError("{} ({}; args:{})", e.what(), IR::NameOf(inst->GetOpcode()), args);
     }
 }
 
@@ -218,7 +227,7 @@ void Traverse(EmitContext& ctx, IR::Program& program) {
             break;
         case IR::AbstractSyntaxNode::Type::Unreachable:
             if (ctx.stage == Stage::Mesh && !ctx.mesh_fallback) {
-                // (hookshot) an indirect branch to none of its table's targets: the mesh shader leaves with no outputs.
+                // (longshot) an indirect branch to none of its table's targets: the mesh shader leaves with no outputs.
                 // RADV makes OpUnreachable a return that leaves its output counts undefined, and GS_ALLOC_REQ then asked
                 // for a garbage count and hung the GPU (issue 1000). Marker for OpSetMeshOutputsEXT 0 0
                 // (PatchMeshInstructions); the epilogue writes the outputs, so none were written yet
@@ -274,7 +283,7 @@ spv::ExecutionMode ExecutionMode(TessSpacing spacing) {
 void DefineEntryPoint(const IR::Program& program, EmitContext& ctx, Id main) {
     const std::span interfaces(ctx.interfaces.data(), ctx.interfaces.size());
     if (ctx.mesh_fallback && (program.stage == Stage::Task || program.stage == Stage::Mesh)) {
-        // (hookshot, issue 640: on a GPU without mesh shaders, a task or mesh program is a compute shader)
+        // (longshot, issue 640: on a GPU without mesh shaders, a task or mesh program is a compute shader)
         ctx.AddExecutionMode(main, spv::ExecutionMode::LocalSize, program.workgroup_size[0], 1U, 1U);
         ctx.AddEntryPoint(spv::ExecutionModel::GLCompute, main, "main", interfaces);
         return;
@@ -521,7 +530,7 @@ void SetupCapabilities(const Profile& profile, const Info& info, EmitContext& ct
         ctx.AddCapability(spv::Capability::VulkanMemoryModelDeviceScope);
         ctx.SetMemoryModel(spv::MemoryModel::VulkanKHR);
     }
-    if (info.uses_cooperative_matrix && mma_software) {   // (hookshot: DefineSoftwareMatrixFunction's)
+    if (info.uses_cooperative_matrix && mma_software) {   // (longshot: DefineSoftwareMatrixFunction's)
         ctx.AddCapability(spv::Capability::GroupNonUniform);
         ctx.AddCapability(spv::Capability::GroupNonUniformShuffle);
     }
@@ -676,7 +685,7 @@ std::vector<u32> EmitSPIRV(const Profile& profile, const RuntimeInfo& runtime_in
     EmitContext ctx{profile, runtime_info, program, bindings};
     if (program.info.uses_cooperative_matrix && mma_software) DefineSoftwareMatrixFunction(ctx);
     Id main{};
-    if (runtime_info.mesh_fallback_vertex) {   // (hookshot: the fallback's generated vertex stage, which reads the records)
+    if (runtime_info.mesh_fallback_vertex) {   // (longshot: the fallback's generated vertex stage, which reads the records)
         const Id void_function{ctx.TypeFunction(ctx.void_id)};
         main = ctx.OpFunction(ctx.void_id, spv::FunctionControlMask::MaskNone, void_function);
         ctx.AddLabel();

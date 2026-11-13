@@ -1,4 +1,4 @@
-/* (hookshot) The Insert menu's Text size: the text of dialogue, Navi and signs drawn larger.
+/* (longshot) The Insert menu's Text size: the text of dialogue, Navi and signs drawn larger.
 
    nx2/oot_patches.py calls hos_oot_text_pane from f_80b1e140, the step of a LetterAnimControl (the text panes with
    "LetterAnimOn"), with that control. The control's +0x28 is the game's pane wrapper: its +8 is the Layout2 text box pane,

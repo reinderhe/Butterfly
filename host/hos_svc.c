@@ -35,7 +35,7 @@ static uint64_t get_info(uint32_t id0, uint64_t id1, int *ok) {
     case 15: return HOS_SYSTEM_END - HOS_SYSTEM_BASE;      /* StackRegionSize */
     case 16: case 17: return 0;                            /* SystemResourceSize total / used */
     case 18: return hos_program_id;                        /* ProgramId (main.npdm's, gen/hos_image.c) */
-    case 20: {   /* UserExceptionContextAddress: (hookshot) OoT's nn::os::SetDyingMessageRegionPrivate writes its
+    case 20: {   /* UserExceptionContextAddress: (longshot) OoT's nn::os::SetDyingMessageRegionPrivate writes its
                     dying-message region into it; a zeroed page, made once */
         static uint64_t ctx_page;
         if (!ctx_page) ctx_page = hos_sys_alloc(0x1000, 0x1000);
@@ -112,11 +112,7 @@ static void release_locked(uint64_t mutex) {
 #if (defined(__x86_64__) || defined(_M_X64)) && !defined(__EMSCRIPTEN__)
 #include <emmintrin.h>
 static int spin_for_release(uint64_t mutex, uint32_t held) {
-    static int64_t limit = -1;
-    if (limit < 0) {
-        const char *e = getenv("HOS_SPIN_US");
-        limit = (e ? atoll(e) : 20) * 1000;
-    }
+    const int64_t limit = hos_spin_ns();
     static int misses[256], tries[256];
     const unsigned slot = (unsigned)(mutex >> 3 ^ mutex >> 11) & 255;
     const int m = __atomic_load_n(&misses[slot], __ATOMIC_RELAXED);
@@ -223,7 +219,7 @@ static void signal_key(uint64_t key, int32_t count) {
     ReleaseSRWLockExclusive(&klock);
 }
 
-/* ---- (hookshot) the address arbiter: svcWaitForAddress / svcSignalToAddress -----------------------------------
+/* ---- (longshot) the address arbiter: svcWaitForAddress / svcSignalToAddress -----------------------------------
    OoT's SDK (22.2.8) uses them; MKW's never did. Waiters share the table above (on_key 2, key = the address) and klock,
    so the condition check and the sleep are atomic against a signal, as in Horizon's KAddressArbiter (mesosphere).
    Wait types: 0 WaitIfLessThan, 1 DecrementAndWaitIfLessThan, 2 WaitIfEqual (32-bit), 3 WaitIfEqual64 (21.0+).
@@ -353,7 +349,7 @@ void a64_svc(Ctx *c, uint32_t imm) {
     hos_vcore_checkpoint();
     switch (imm) {
     case 0x01: { /* SetHeapSize(-, size) -> (result, heap address) */
-        int hos_heap_size_fits(uint64_t size);   /* (hookshot, hos_mem.c: the heap stays in the guest window) */
+        int hos_heap_size_fits(uint64_t size);   /* (longshot, hos_mem.c: the heap stays in the guest window) */
         if (!hos_heap_size_fits(c->x[1])) {
             c->x[0] = 0xCA01;   /* svc::ResultOutOfMemory */
             return;
@@ -422,10 +418,10 @@ void a64_svc(Ctx *c, uint32_t imm) {
     case 0x1C:   /* WaitProcessWideKeyAtomic(mutex, key, tag, timeout) */
         c->x[0] = wait_key(c->x[0], c->x[1], (uint32_t)c->x[2], (int64_t)c->x[3]);
         return;
-    case 0x34:   /* WaitForAddress(address, type, value, timeout) (hookshot) */
+    case 0x34:   /* WaitForAddress(address, type, value, timeout) (longshot) */
         c->x[0] = wait_address(c->x[0], (uint32_t)c->x[1], c->x[2], (int64_t)c->x[3]);
         return;
-    case 0x35:   /* SignalToAddress(address, type, value, count) (hookshot) */
+    case 0x35:   /* SignalToAddress(address, type, value, count) (longshot) */
         c->x[0] = signal_address(c->x[0], (uint32_t)c->x[1], (int32_t)c->x[2], (int32_t)c->x[3]);
         return;
     case 0x1D:   /* SignalProcessWideKey(key, count) */
@@ -433,7 +429,11 @@ void a64_svc(Ctx *c, uint32_t imm) {
         return;
     case 0x0B: { /* SleepThread(ns) */
         void hos_sleep_logged(int64_t ns, uint64_t lr);
+        extern _Thread_local int64_t hos_slept_ns[2];   /* (hos_thread.c: the FPS counter's Breakdown, while it shows) */
+        extern volatile int hos_fps_timing;
+        const int64_t t0 = hos_fps_timing ? hos_now_ns() : 0;
         hos_sleep_logged((int64_t)c->x[0], c->x[30] | 1);
+        if (t0) hos_slept_ns[1] += hos_now_ns() - t0;
         return;
     }
     case 0x10:   /* GetCurrentProcessorNumber */
@@ -468,7 +468,7 @@ void a64_svc(Ctx *c, uint32_t imm) {
         c->x[0] = R_OK;
         return;
     case 0x2D:   /* UnmapPhysicalMemory(address, size): the pages read as zero if mapped again */
-        if (!hos_guest_range(c->x[0], c->x[1])) {   /* (hookshot: guest pages only) */
+        if (!hos_guest_range(c->x[0], c->x[1])) {   /* (longshot: guest pages only) */
             c->x[0] = 0xCA01;
             return;
         }
@@ -479,7 +479,7 @@ void a64_svc(Ctx *c, uint32_t imm) {
         }
         c->x[0] = R_OK;
         return;
-    case 0x1F: { /* ConnectToNamedPort(-, name) -> (result, session handle): (hookshot) SDK code that resolves a
+    case 0x1F: { /* ConnectToNamedPort(-, name) -> (result, session handle): (longshot) SDK code that resolves a
                     service through "sm:" (nn::sm::Initialize, from nn::nsd's HIPC client in OoT) gets a session
                     whose requests svc 0x21 answers empty, as for any service the runtime does not emulate. */
         static volatile LONG next = 0;

@@ -25,7 +25,7 @@ class MsvcLinkTests(unittest.TestCase):
     def test_msvc_link_does_not_ask_for_oldnames(self):
         fake_os = types.SimpleNamespace(name="nt", path=os.path, environ=os.environ)
         with mock.patch.object(toolchain, "os", fake_os), \
-                mock.patch.dict(os.environ, {"HOOKSHOT_MINGW": ""}), \
+                mock.patch.dict(os.environ, {"LONGSHOT_MINGW": ""}), \
                 mock.patch.object(toolchain, "lld_link", return_value=r"C:\emSDK\lld-link.exe"):
             link = toolchain.native_link()
         self.assertEqual(link[0], "-fuse-ld=lld")

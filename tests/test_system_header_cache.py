@@ -20,7 +20,7 @@ RUN_ALL_ARGS = ["--cc", "clang"]
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'third_party/a64-kit/tools'))
-SOURCE = Path(os.environ.get('HOOKSHOT_HEADER_CACHE_SOURCE', ROOT / 'nx2/make_game.py'))
+SOURCE = Path(os.environ.get('LONGSHOT_HEADER_CACHE_SOURCE', ROOT / 'nx2/make_game.py'))
 spec = importlib.util.spec_from_file_location('make_game_header_cache', SOURCE)
 make_game = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(make_game)
@@ -31,7 +31,7 @@ COMPILER = None
 class HeaderCacheTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(COMPILER, 'Pass an explicit --cc compiler supporting -M')
-        self.temporary = tempfile.TemporaryDirectory(prefix='hookshot-headers-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='longshot-headers-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.addCleanup(self.check_boundary)
@@ -49,7 +49,7 @@ class HeaderCacheTests(unittest.TestCase):
         self.assertTrue(all(p.resolve().is_relative_to(self.root) for p in self.root.rglob('*')))
 
     def install(self, tag, extra_header=None):
-        tools = self.root / 'versions' / tag / 'HookshotBuilder/tools'
+        tools = self.root / 'versions' / tag / 'LongshotBuilder/tools'
         include = tools / 'include'
         include.mkdir(parents=True)
         for name in ('stdio.h', 'stdlib.h', 'windows.h'):

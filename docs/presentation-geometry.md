@@ -40,7 +40,7 @@ normal/generated images, filtered/direct blits, bar clears and restore. It does 
 execute Vulkan; backend compilation and a synthetic GPU/window integration run are
 separate validation layers.
 
-An optional GPU check (Vulkan 1.3 loader/device and `HOOKSHOT_VULKAN_HEADERS` needed):
+An optional GPU check (Vulkan 1.3 loader/device and `LONGSHOT_VULKAN_HEADERS` needed):
 
 ```sh
 python -I -B tests/run_all.py present_aspect_vulkan --strict

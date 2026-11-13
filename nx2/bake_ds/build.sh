@@ -1,7 +1,7 @@
 #!/bin/bash
 # (bake-deepseek) Build the offline translator: Eden's recompiler + sirit + one driver. No Vulkan device.
 #
-#   nx2/bake_ds/build.sh                 -> $OUT/bake_ds (default ${TMPDIR:-/tmp}/hookshot-ds)
+#   nx2/bake_ds/build.sh                 -> $OUT/bake_ds (default ${TMPDIR:-/tmp}/longshot-ds)
 #   OUT=... EXT=... CXX=... JOBS=... nx2/bake_ds/build.sh
 #
 # Sources are compiled into $OUT/obj, never into the repository. Needs a C++23 compiler (the recompiler's
@@ -10,7 +10,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=${ROOT:-$(cd "$HERE/../.." && pwd)}
-OUT=${OUT:-${TMPDIR:-/tmp}/hookshot-ds}
+OUT=${OUT:-${TMPDIR:-/tmp}/longshot-ds}
 CXX=${CXX:-g++}
 JOBS=${JOBS:-$(nproc)}
 EXT=${EXT:-}

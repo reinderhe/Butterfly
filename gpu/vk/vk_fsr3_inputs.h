@@ -1,4 +1,4 @@
-// (hookshot) AMD FSR 3.1's inputs (vk_fsr3_inputs.cpp): everything FSR 3.1's upscaler (vk_fsr3.h) and its frame
+// (longshot) AMD FSR 3.1's inputs (vk_fsr3_inputs.cpp): everything FSR 3.1's upscaler (vk_fsr3.h) and its frame
 // interpolation (vk_fsr3fi.h) are given besides the picture, in one place, so they can move onto the renderer's shared
 // temporal inputs (#1008) by changing this file alone.
 //

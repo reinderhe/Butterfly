@@ -4,7 +4,7 @@ profile), and a new install's first field load was drawn white for seconds while
 
   - the committed sources are xz files of whole lists of this build's format, and hold pipelines;
   - scripts/linux/appimage.sh carries assets/ and stops without the sources;
-  - scripts/release_parts.py package puts them in the Windows builder's tools/assets, where nx2/make_game.py looks for them,
+  - scripts/builder_package.py package puts them in the Windows builder's tools/assets, where nx2/make_game.py looks for them,
     and stops when there are none, or one is damaged, empty or of another format.
 
 Game-free: the list holds shader hashes and draw state, and the rest is synthetic.
@@ -36,7 +36,7 @@ class ShippedList(unittest.TestCase):
     def setUp(self):
         self.tool = load("pipeline_states", ROOT / "nx2" / "pipeline_states.py")
         self.src = ROOT.joinpath(*self.tool.SOURCES)
-        self.tmp = Path(tempfile.mkdtemp(prefix="hookshot-ship-states-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="longshot-ship-states-"))
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -88,7 +88,7 @@ class ShippedList(unittest.TestCase):
         self.assertIn("holds no pipeline state list", r.stdout + r.stderr)
 
     def release_parts(self, data):
-        """release_parts.py with its ROOT a small checkout: nx2/pipeline_states.py and, when data, a source of the shipped list"""
+        """builder_package.py with its ROOT a small checkout: nx2/pipeline_states.py and, when data, a source of the shipped list"""
         root = self.tmp / "repo"
         (root / "nx2").mkdir(parents=True)
         (root / "assets").mkdir()
@@ -96,7 +96,7 @@ class ShippedList(unittest.TestCase):
         (root / "LICENSE").write_text("license")
         if data is not None:
             self.fake_sources(root.joinpath(*self.tool.SOURCES), data)
-        rp = load("release_parts_under_test", ROOT / "scripts" / "release_parts.py")
+        rp = load("builder_package_under_test", ROOT / "scripts" / "builder_package.py")
         rp.ROOT = str(root)
         rp.tracked = lambda *paths: []   # (git ls-files: none of the sources are needed here)
         return rp, root
@@ -104,7 +104,7 @@ class ShippedList(unittest.TestCase):
     def package(self, rp):
         publish = self.tmp / "publish"
         publish.mkdir(exist_ok=True)
-        (publish / "HookshotBuilder.exe").write_bytes(b"MZ")
+        (publish / "LongshotBuilder.exe").write_bytes(b"MZ")
         setup = self.tmp / "setup.exe"
         setup.write_bytes(b"MZ")
         out = self.tmp / "package"
@@ -125,7 +125,7 @@ class ShippedList(unittest.TestCase):
         game = self.tmp / "game"
         game.mkdir()
         make_game.ship_state_list(str(game))
-        self.assertEqual(len(self.tool.read(str(game / "hookshot_pipeline_states_shipped.bin"))), 3)
+        self.assertEqual(len(self.tool.read(str(game / "longshot_pipeline_states_shipped.bin"))), 3)
 
     def test_windows_package_stops_without_it(self):
         damaged = self.fake_list(3)

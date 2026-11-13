@@ -1,5 +1,8 @@
 """Game-free checks of make_game's NUP cache selection and replacement.
 
+make_game runs as from a checkout of its own, with nothing in its work/: a developer's play profile in the clone's
+work/ (CONTRIBUTING.md puts it there) was copied in and probed with clang, a process these checks refuse.
+
 Run with: python -I tests/test_make_game_cache.py
 """
 import contextlib
@@ -16,7 +19,7 @@ import unittest
 from unittest import mock
 
 
-SOURCE = Path(os.environ.get("HOOKSHOT_CACHE_TEST_SOURCE", Path(__file__).resolve().parents[1] / "nx2" / "make_game.py"))
+SOURCE = Path(os.environ.get("LONGSHOT_CACHE_TEST_SOURCE", Path(__file__).resolve().parents[1] / "nx2" / "make_game.py"))
 spec = importlib.util.spec_from_file_location("make_game_under_test", SOURCE)
 make_game = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(make_game)
@@ -35,7 +38,7 @@ def module_bytes(supported=True, payload=b"new authored module"):
 
 class NupCacheTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="hookshot-cache-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="longshot-cache-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.out = self.root / "output"
@@ -49,13 +52,14 @@ class NupCacheTests(unittest.TestCase):
         self.new_nup.write_bytes(b"new authored input of a different size")
         (self.out / "romfs").mkdir()
         (self.out / "romfs" / "asset.txt").write_bytes(b"old authored assets")
-        (self.out / ".hookshot_exefs").mkdir()
-        (self.out / ".hookshot_exefs" / "main").write_bytes(module_bytes(payload=b"old authored module"))
-        self.marker = self.out / ".hookshot_romfs"
+        (self.out / ".longshot_exefs").mkdir()
+        (self.out / ".longshot_exefs" / "main").write_bytes(module_bytes(payload=b"old authored module"))
+        self.marker = self.out / ".longshot_romfs"
         self.marker.write_text(self.stamp(self.old_nup) + "\n")
         save = self.out / "user" / "save"
         save.mkdir(parents=True)
         (save / "sentinel.txt").write_bytes(b"authored save sentinel")
+        (self.out / "longshot_options.ini").write_bytes(b"authored options sentinel")
         self.extractions = []
         self.output = ""
 
@@ -72,7 +76,8 @@ class NupCacheTests(unittest.TestCase):
         return {path.relative_to(self.out).as_posix(): path.read_bytes()
                 for path in self.out.rglob("*") if path.is_file() and ".game" not in path.parts}
 
-    def run_to_lift(self, nup, failure=None, supported=True, include_romfs=True, update=False, folders=None):
+    def run_to_lift(self, nup, failure=None, supported=True, include_romfs=True, update=False, folders=None,
+                    romfs_files=None):
         self.assert_owned_fixture()
 
         def run(cmd, env=None, on_line=None):
@@ -90,6 +95,10 @@ class NupCacheTests(unittest.TestCase):
                     (target / "romfs").mkdir()
                     (target / "romfs" / "asset.txt").write_bytes(b"new authored assets")
                     (target / "romfs" / "new-only.txt").write_bytes(b"new authored file")
+                    for name, data in (romfs_files or {}).items():
+                        path = target / "romfs" / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(data)
                 return
             if "nx2/lift.py" in cmd:
                 raise Prepared
@@ -119,6 +128,10 @@ class NupCacheTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(make_game, "drop_stale_objects"))
             stack.enter_context(mock.patch.object(make_game, "no_throttle"))
             stack.enter_context(mock.patch("ctypes.WinDLL", create=True))
+            # (the hot list, link order, PGO profile and chunk boundaries come from <checkout>/work: an empty one here. The lift's
+            # key hashes nx2/ relative to the checkout, which relpath refuses across drives (Windows CI): not what is checked here)
+            stack.enter_context(mock.patch.object(make_game, "ROOT", str(self.root / "checkout")))
+            stack.enter_context(mock.patch.object(make_game, "lift_key", return_value="test key"))
             stack.enter_context(mock.patch.object(make_game, "run", side_effect=run))
             output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             try:
@@ -175,9 +188,10 @@ class NupCacheTests(unittest.TestCase):
         self.assertEqual(self.extractions, [])
         after = self.cache()
         # (the one file added: the damaged-texture check's note that this unpack was checked, nup.stand_in_damaged)
-        self.assertEqual(after.pop(".hookshot_romfs_checked", None), before[".hookshot_romfs"])
+        self.assertEqual(after.pop(".longshot_romfs_checked").decode().splitlines(),
+                         ["resolved-v2"] + before[".longshot_romfs"].decode().splitlines())
         self.assertEqual(after, before)
-        self.assertEqual((scratch / "main").read_bytes(), (self.out / ".hookshot_exefs/main").read_bytes())
+        self.assertEqual((scratch / "main").read_bytes(), (self.out / ".longshot_exefs/main").read_bytes())
 
     def test_changed_source_replaces_romfs_and_exefs_together(self):
         with self.assertRaises(Prepared):
@@ -185,9 +199,10 @@ class NupCacheTests(unittest.TestCase):
         self.assertEqual(self.extractions, [self.new_nup])
         self.assertEqual((self.out / "romfs" / "asset.txt").read_bytes(), b"new authored assets")
         self.assertTrue((self.out / "romfs" / "new-only.txt").is_file())
-        self.assertEqual((self.out / ".hookshot_exefs" / "main").read_bytes(), module_bytes())
+        self.assertEqual((self.out / ".longshot_exefs" / "main").read_bytes(), module_bytes())
         self.assertEqual(self.marker.read_text(), self.stamp(self.new_nup) + "\n")
         self.assertEqual((self.out / "user/save/sentinel.txt").read_bytes(), b"authored save sentinel")
+        self.assertEqual((self.out / "longshot_options.ini").read_bytes(), b"authored options sentinel")
 
     def test_same_source_reuses_the_cache(self):
         before = self.cache()
@@ -196,10 +211,101 @@ class NupCacheTests(unittest.TestCase):
         self.assertEqual(self.extractions, [])
         after = self.cache()
         # (the one file added: the damaged-texture check's note that this unpack was checked, nup.stand_in_damaged)
-        self.assertEqual(after.pop(".hookshot_romfs_checked", None), before[".hookshot_romfs"])
+        self.assertEqual(after.pop(".longshot_romfs_checked").decode().splitlines(),
+                         ["resolved-v2"] + before[".longshot_romfs"].decode().splitlines())
         self.assertEqual(after, before)
         self.assertEqual((self.work / "exefs/main").read_bytes(),
-                         (self.out / ".hookshot_exefs/main").read_bytes())
+                         (self.out / ".longshot_exefs/main").read_bytes())
+
+    def test_unresolved_fresh_extraction_stops_before_lift(self):
+        original = self.new_nup.read_bytes()
+        with self.assertRaises(SystemExit) as result:
+            self.run_to_lift(self.new_nup, romfs_files={"Tex/only_Alb.bntx.zs": bytes(32)})
+        self.assertEqual(result.exception.code, 1)
+        self.assertIn("@@error The game dump still has 1 damaged file with no replacement", self.output)
+        self.assertIn("only_Alb.bntx.zs", self.output)
+        self.assertFalse((self.out / ".longshot_romfs_checked").exists())
+        self.assertEqual(self.new_nup.read_bytes(), original)
+        self.assertEqual((self.out / "user/save/sentinel.txt").read_bytes(), b"authored save sentinel")
+        self.assertEqual((self.out / "longshot_options.ini").read_bytes(), b"authored options sentinel")
+
+    def test_unresolved_cached_extraction_retries_until_a_donor_is_available(self):
+        tex = self.out / "romfs/Tex"
+        tex.mkdir()
+        broken = tex / "only_Alb.bntx.zs"
+        broken.write_bytes(bytes(32))
+        heads = self.out / make_game.HEADS
+        heads.write_text(self.marker.read_text() + "Tex/only_Alb.bntx.zs\n")
+        original_heads = heads.read_bytes()
+        original_nup = self.old_nup.read_bytes()
+        for update in (False, True):
+            with self.subTest(update=update), self.assertRaises(SystemExit) as result:
+                self.run_to_lift(None if update else self.old_nup, update=update)
+            self.assertEqual(result.exception.code, 1)
+            self.assertIn("1 damaged file with no replacement", self.output)
+            note = self.out / make_game.DAMAGED_NOTE
+            self.assertTrue(note.is_file(), "the unresolved failure must leave the damaged-file report")
+            self.assertIn("only_Alb.bntx.zs: no replacement found; build cannot continue", note.read_text(encoding="utf-8"))
+            self.assertFalse((self.out / ".longshot_romfs_checked").exists())
+            self.assertEqual(heads.read_bytes(), original_heads)
+            self.assertEqual(broken.read_bytes(), bytes(32))
+        donor = tex / "other_Alb.bntx.zs"
+        donor.write_bytes(b"\x28\xb5\x2f\xfd" + b"authored counterpart")
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.old_nup)
+        self.assertEqual(broken.read_bytes(), donor.read_bytes())
+        self.assertFalse(heads.exists())
+        self.assertEqual((self.out / ".longshot_romfs_checked").read_text(), "resolved-v2\n" + self.marker.read_text())
+        self.assertEqual(self.old_nup.read_bytes(), original_nup)
+        self.assertEqual((self.out / "user/save/sentinel.txt").read_bytes(), b"authored save sentinel")
+        self.assertEqual((self.out / "longshot_options.ini").read_bytes(), b"authored options sentinel")
+
+    def test_legacy_marker_does_not_hide_unresolved_damage(self):
+        checked = self.out / ".longshot_romfs_checked"
+        checked.write_bytes(self.marker.read_bytes())
+        tex = self.out / "romfs/Tex"
+        tex.mkdir()
+        broken = tex / "only_Alb.bntx.zs"
+        broken.write_bytes(bytes(32))
+        with self.assertRaises(SystemExit) as result:
+            self.run_to_lift(self.old_nup)
+        self.assertEqual(result.exception.code, 1)
+        self.assertIn("1 damaged file with no replacement", self.output)
+        self.assertFalse(checked.exists())
+        self.assertEqual(broken.read_bytes(), bytes(32))
+
+    def test_legacy_healthy_marker_is_checked_once(self):
+        checked = self.out / ".longshot_romfs_checked"
+        checked.write_bytes(self.marker.read_bytes())
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.old_nup)
+        self.assertIn("checking your game files", self.output)
+        self.assertEqual(checked.read_text(), "resolved-v2\n" + self.marker.read_text())
+        with mock.patch.object(make_game, "file_progress", side_effect=AssertionError("Unexpected second scan")):
+            with self.assertRaises(Prepared):
+                self.run_to_lift(self.old_nup)
+
+    def test_fully_repairable_fresh_extraction_reaches_lift(self):
+        donor = b"\x28\xb5\x2f\xfd" + b"authored counterpart"
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, romfs_files={"Tex/only_Alb.bntx.zs": bytes(32),
+                                                      "Tex/other_Alb.bntx.zs": donor})
+        self.assertIn("in its place other_Alb.bntx.zs", self.output)
+        self.assertEqual((self.out / "romfs/Tex/only_Alb.bntx.zs").read_bytes(), donor)
+        self.assertTrue((self.out / ".longshot_romfs_checked").exists())
+
+    def test_mixed_repairs_report_the_unresolved_count(self):
+        with self.assertRaises(SystemExit) as result:
+            self.run_to_lift(self.new_nup, romfs_files={
+                "Tex/only_Alb.bntx.zs": bytes(32),
+                "Tex/other_Alb.bntx.zs": b"\x28\xb5\x2f\xfd" + b"authored counterpart",
+                "Model/missing.bfres.zs": bytes(32),
+            })
+        self.assertEqual(result.exception.code, 1)
+        self.assertIn("2 game files in it are damaged", self.output)
+        self.assertIn("1 damaged file with no replacement", self.output)
+        self.assertIn("missing.bfres.zs", self.output)
+        self.assertFalse((self.out / ".longshot_romfs_checked").exists())
 
     def test_failed_extraction_preserves_the_previous_cache_and_save(self):
         before = self.cache()
@@ -218,7 +324,7 @@ class NupCacheTests(unittest.TestCase):
             self.run_to_lift(self.new_nup, supported=False)
         self.assertEqual(self.extractions, [self.new_nup])
         self.assertEqual(result.exception.code, 1)
-        self.assertIn("This is build 01234567. Hookshot supports build %s." % make_game.BUILD_ID, self.output)
+        self.assertIn("This is build 01234567. Longshot supports build %s." % make_game.BUILD_ID, self.output)
         self.assertEqual(self.cache(), before)
         self.assertFalse((self.out / ".game").exists())
 
@@ -268,7 +374,7 @@ class NupCacheTests(unittest.TestCase):
 
 class RomfsCopyTests(unittest.TestCase):
     def test_interrupted_cross_volume_copy_can_be_retried(self):
-        with tempfile.TemporaryDirectory(prefix="hookshot-romfs-copy-") as folder:
+        with tempfile.TemporaryDirectory(prefix="longshot-romfs-copy-") as folder:
             src, dst = Path(folder) / "source", Path(folder) / "destination"
             src.mkdir()
             dst.mkdir()
@@ -295,7 +401,7 @@ class RomfsCopyTests(unittest.TestCase):
             self.assertEqual({p.name for p in dst.iterdir()}, {"asset.bin", "existing.bin"})
 
     def test_failed_replacement_removes_the_staged_read_only_copy(self):
-        with tempfile.TemporaryDirectory(prefix="hookshot-romfs-replace-") as folder:
+        with tempfile.TemporaryDirectory(prefix="longshot-romfs-replace-") as folder:
             src, dst = Path(folder) / "source", Path(folder) / "destination"
             src.mkdir()
             source = src / "asset.bin"
@@ -311,7 +417,7 @@ class RomfsCopyTests(unittest.TestCase):
 
     def test_links_in_an_extracted_dump_are_refused(self):
         # (a link in --romfs or --exefs was followed: the file it named was hard-linked or copied into the game folder)
-        with tempfile.TemporaryDirectory(prefix="hookshot-dump-links-") as folder:
+        with tempfile.TemporaryDirectory(prefix="longshot-dump-links-") as folder:
             src, secret = Path(folder) / "romfs", Path(folder) / "secret"
             (src / "Model").mkdir(parents=True)
             (src / "Model" / "a.zs").write_bytes(b"game data")

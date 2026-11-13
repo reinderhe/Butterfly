@@ -70,14 +70,23 @@ class Heads(unittest.TestCase):
             romfs = os.path.join(out, "romfs")
             os.replace(os.path.join(game, "romfs"), romfs)
             stamp = "unpacked by this builder: authored.nup 123"
-            Path(out, ".hookshot_romfs").write_text(stamp + "\n")
+            Path(out, ".longshot_romfs").write_text(stamp + "\n")
             make_game.keep_heads(out, game, stamp)
             with mock.patch.object(nup, "damaged_game_files", side_effect=AssertionError("every file opened again")):
                 make_game.stand_in_damaged_files(out, romfs)
             # (the damaged file now holds its stand-in: a whole one of the same kind)
             self.assertEqual(Path(romfs, "Model", "damaged.bntx.zs").read_bytes(), WHOLE)
             self.assertFalse(os.path.exists(os.path.join(out, make_game.HEADS)))
-            self.assertEqual(Path(out, ".hookshot_romfs_checked").read_text(), stamp + "\n")
+            self.assertEqual(Path(out, ".longshot_romfs_checked").read_text(), "resolved-v2\n" + stamp + "\n")
+            # (#2237: the list is kept in the game folder, where the build's output is not)
+            note = Path(out, make_game.DAMAGED_NOTE)
+            listed = note.read_text(encoding="utf-8")
+            self.assertTrue(listed.startswith("Your game dump is incomplete: 1 game file in it is damaged"))
+            self.assertIn(os.path.join("Model", "damaged.bntx.zs") + ": in its place ", listed)
+            # (a whole dump unpacked next: the list goes)
+            Path(out, ".longshot_romfs").write_text("unpacked by this builder: whole.nup 456\n")
+            make_game.stand_in_damaged_files(out, romfs)
+            self.assertFalse(note.exists())
 
     def test_a_list_from_another_unpack_is_not_taken(self):
         with tempfile.TemporaryDirectory() as d:
@@ -87,11 +96,50 @@ class Heads(unittest.TestCase):
             romfs = os.path.join(out, "romfs")
             os.replace(os.path.join(game, "romfs"), romfs)
             make_game.keep_heads(out, game, "unpacked by this builder: an older.nup 1")
-            Path(out, ".hookshot_romfs").write_text("unpacked by this builder: authored.nup 123\n")
+            Path(out, ".longshot_romfs").write_text("unpacked by this builder: authored.nup 123\n")
             with mock.patch.object(nup, "damaged_game_files", wraps=nup.damaged_game_files) as opened:
                 make_game.stand_in_damaged_files(out, romfs)
             opened.assert_called_once()
             self.assertEqual(Path(romfs, "Model", "damaged.bntx.zs").read_bytes(), WHOLE)
+
+    def test_a_stamp_keeps_a_name_outside_the_code_page(self):
+        """#2246: "Zelda™⁚ Ocarina.nup" stopped the build with a UnicodeEncodeError where Windows' code page is cp1252"""
+        with tempfile.TemporaryDirectory() as d, mock.patch("locale.getencoding", return_value="cp1252"):
+            stamp = "unpacked by this builder: Zelda™⁚ Ocarina.nup 123\n"
+            path = os.path.join(d, ".longshot_romfs")
+            make_game.write_stamp(path, stamp)
+            self.assertEqual(Path(path).read_bytes(), stamp.encode("utf-8"))
+            self.assertEqual(make_game.read_stamp(path), stamp)
+            # (a stamp an earlier builder wrote in the code page still reads as it was: no second unpack)
+            old = "unpacked by this builder: Zelda™ Ocarina.nup 123\r\n"
+            Path(path).write_bytes(old.encode("cp1252"))
+            self.assertEqual(make_game.read_stamp(path), old)
+            # (a byte the code page has no letter for: no stamp, not a name with a replaced letter)
+            Path(path).write_bytes(b"unpacked by this builder: authored \x81.nup 22\n")
+            self.assertEqual(make_game.read_stamp(path), "")
+
+    def test_resolved_check_keeps_unicode_unpack_stamp_and_skips_only_after_success(self):
+        with tempfile.TemporaryDirectory() as out, mock.patch("locale.getencoding", return_value="cp1252"):
+            romfs = Path(out, "romfs")
+            romfs.mkdir()
+            stamp = "unpacked by this builder: authored\u2122\u205a.nup 123\n"
+            make_game.write_stamp(Path(out, ".longshot_romfs"), stamp)
+            checked = Path(out, ".longshot_romfs_checked")
+            with mock.patch.object(nup, "stand_in_damaged", return_value=[]) as scan:
+                make_game.stand_in_damaged_files(out, str(romfs))
+                make_game.stand_in_damaged_files(out, str(romfs))
+            self.assertEqual(scan.call_count, 1)
+            self.assertEqual(checked.read_bytes(), ("resolved-v2\n" + stamp).encode("utf-8"))
+
+    def test_a_stamp_that_cannot_be_read_matches_no_name(self):
+        """A letter replaced while decoding made two names equal, and the second .nup's unpack was skipped (Python's UTF-8
+        mode, where the preferred encoding is UTF-8 again)"""
+        with tempfile.TemporaryDirectory() as d, mock.patch("locale.getencoding", return_value="utf-8"), \
+                mock.patch("locale.getpreferredencoding", return_value="utf-8"):
+            path = os.path.join(d, ".longshot_romfs")
+            Path(path).write_bytes(b"unpacked by this builder: authored \xff.nup 22\n")
+            self.assertNotEqual(make_game.read_stamp(path), "unpacked by this builder: authored �.nup 22\n")
+            self.assertEqual(make_game.read_stamp(path), "")
 
 
 if __name__ == "__main__":

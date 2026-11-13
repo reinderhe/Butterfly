@@ -190,12 +190,12 @@ def main(argv=None):
     import argparse
     p = argparse.ArgumentParser(description="enumerate -> translate -> bank on the fixtures")
     p.add_argument("--cxx", default=None, help="C++ compiler (sets BAKE_CXX)")
-    p.add_argument("--headers", default=None, help="SPIR-V headers dir (sets HOOKSHOT_SPIRV_HEADERS)")
+    p.add_argument("--headers", default=None, help="SPIR-V headers dir (sets LONGSHOT_SPIRV_HEADERS)")
     a = p.parse_args(argv)
     if a.cxx:
         os.environ["BAKE_CXX"] = a.cxx
     if a.headers:
-        os.environ["HOOKSHOT_SPIRV_HEADERS"] = a.headers
+        os.environ["LONGSHOT_SPIRV_HEADERS"] = a.headers
     # (a compiler and the SPIR-V headers are what the translate stage needs; without them the miner and the bank
     #  still run — tests/run_all.py skips a check whose tool is missing the same way)
     sys.path.insert(0, str(ROOT / "nx2"))
@@ -206,7 +206,7 @@ def main(argv=None):
         print("SKIP: %s" % e)
         return
     if not bake_mimo.spirv_headers():
-        print("SKIP: no SPIR-V headers (HOOKSHOT_SPIRV_HEADERS or a CPM cache): only the miner could run")
+        print("SKIP: no SPIR-V headers (LONGSHOT_SPIRV_HEADERS or a CPM cache): only the miner could run")
         return
     if OUT.exists():
         shutil.rmtree(OUT)
@@ -225,7 +225,7 @@ def main(argv=None):
     kinds = sorted(p["kind"] for p in manifest["programs"])
     assert kinds == ["compute", "graphics", "mesh"], kinds
     # stable IDs: the FNV-1a code_key, recomputed here from the seed itself
-    seed = (OUT / "hookshot_shaders.bin").read_text if False else (OUT / "hookshot_shaders.bin").read_bytes()
+    seed = (OUT / "longshot_shaders.bin").read_text if False else (OUT / "longshot_shaders.bin").read_bytes()
     assert seed[:8] == b"HKSEED01"
     nprograms, nstages = struct.unpack_from("<II", seed, 8)
     assert (nprograms, nstages) == (3, 5), (nprograms, nstages)

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Start a built game from its folder, without the AppImage's libraries.
+# The builder AppImage calls this for --play, --launch <folder> and <folder>.
+#
+#   longshot-launch                      ~/Games/Longshot, the folder a build goes to by default
+#   longshot-launch /path/to/the/game    that folder
+set -eu
+
+folder=${1:-$HOME/Games/Longshot}
+
+if ! [ -f "$folder/image.bin" ] || ! [ -x "$folder/bin/longshot" ]; then
+    echo "Longshot: no built game to start in $folder. Build one with the Longshot Launcher, or pass its folder." >&2
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ ! -t 2 ]; then
+        if command -v zenity >/dev/null 2>&1; then
+            zenity --error --title=Longshot --text="No built game to start. Build one with the Longshot Launcher first." || true
+        elif command -v kdialog >/dev/null 2>&1; then
+            kdialog --error "No built game to start. Build one with the Longshot Launcher first." || true
+        fi
+    fi
+    exit 1
+fi
+
+# The AppImage runtime and the builder put their own libraries on the search path. The game loads
+# SDL from beside itself, so those names go before it starts. The same set as make_game.GAME_ENV_DROP.
+names=$(env | awk -F= '$1 ~ /^(LONGSHOT_|PYTHON|APPDIR|APPIMAGE|ARGV0|OWD)/ || $1 == "LD_LIBRARY_PATH" { print $1 }')
+for name in $names; do
+    unset "$name"
+done
+
+cd "$folder"
+# (--play already chose Play. The game's own update question stays for a bin/longshot the player started themselves)
+export LONGSHOT_NO_UPDATE_CHECK=1
+exec ./bin/longshot

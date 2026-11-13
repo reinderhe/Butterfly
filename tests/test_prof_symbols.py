@@ -1,8 +1,8 @@
 """The profile readers (scripts/prof.py, crit.py, hotlist.py) name frames from both builds.
 
-Windows samples name hookshot.exe / hookshot_vk.dll, read through the linker maps; Linux samples name hookshot /
-hookshot_vk.so, read through the binaries' own symbols (nm). Before, the Linux names were unknown: crit.py counted every
-Linux thread as never running (0.0%) and named nothing. A small position-independent executable called hookshot prints
+Windows samples name longshot.exe / longshot_vk.dll, read through the linker maps; Linux samples name longshot /
+longshot_vk.so, read through the binaries' own symbols (nm). Before, the Linux names were unknown: crit.py counted every
+Linux thread as never running (0.0%) and named nothing. A small position-independent executable called longshot prints
 its functions' offsets from its load address, as a sample has them; crit.py and hotlist.py must name and count them. A
 synthetic linker map checks the Windows path. The ELF part needs a C compiler and nm (skipped without them).
 python -I -B tests/test_prof_symbols.py [--cc gcc]
@@ -49,15 +49,15 @@ def check(cond, what):
 
 
 def windows_map(tmp):
-    """the linker-map path, unchanged: a frame in hookshot.exe named from hookshot.map"""
+    """the linker-map path, unchanged: a frame in longshot.exe named from longshot.map"""
     maps = tmp / "win"
     maps.mkdir()
-    (maps / "hookshot.map").write_text(
+    (maps / "longshot.map").write_text(
         " Address         Publics by Value              Rva+Base               Lib:Object\n\n"
         " 0001:00000000       f_80002000                 0000000140001000 f   code.obj\n"
         " 0001:00000100       f_80002400                 0000000140001100 f   code.obj\n")
     samples = tmp / "win_all.txt"
-    samples.write_text("".join("%d sead::MainThread|hookshot.exe+1010;hookshot.exe+1110\n" % (2 * i) for i in range(1, 6)))
+    samples.write_text("".join("%d sead::MainThread|longshot.exe+1010;longshot.exe+1110\n" % (2 * i) for i in range(1, 6)))
     out = run("crit.py", [str(samples)], maps)
     check("100.0%  sead::MainThread" in out, "crit.py: the Windows main thread runs in every sample\n" + out)
     hot = tmp / "win_hot.txt"
@@ -73,7 +73,7 @@ def linux_elf(tmp, cc):
     maps.mkdir()
     src = tmp / "probe.c"
     src.write_text(PROBE)
-    exe = maps / "hookshot"
+    exe = maps / "longshot"
     subprocess.run([cc, "-O1", "-fPIE", "-pie", "-o", str(exe), str(src)], check=True)
     r = subprocess.run([str(exe)], capture_output=True, text=True)
     check(r.returncode == 0, "the probe runs")
@@ -81,24 +81,40 @@ def linux_elf(tmp, cc):
     # (the main thread inside f_80001000 called from prof_symbol_probe; the replay thread blocked in libc)
     lines = []
     for i in range(1, 9):
-        lines.append("%d sead::MainThread|hookshot+%x;hookshot+%x;libc.so.6+2a1ca\n" % (2 * i, lifted + 2, probe + 4))
-        lines.append("%d Presentation_Thread|libc.so.6+98d61;hookshot+%x\n" % (2 * i, probe + 4))
+        lines.append("%d sead::MainThread|longshot+%x;longshot+%x;libc.so.6+2a1ca\n" % (2 * i, lifted + 2, probe + 4))
+        lines.append("%d Presentation_Thread|libc.so.6+98d61;longshot+%x\n" % (2 * i, probe + 4))
     samples = tmp / "linux_all.txt"
     samples.write_text("".join(lines))
     out = run("crit.py", [str(samples)], maps)
-    check("100.0%  sead::MainThread" in out, "crit.py: a Linux thread in hookshot is running\n" + out)
+    check("100.0%  sead::MainThread" in out, "crit.py: a Linux thread in longshot is running\n" + out)
     check("0.0%  Presentation_Thread" in out, "crit.py: a Linux thread in libc is blocked\n" + out)
     hot = tmp / "linux_hot.txt"
     run("hotlist.py", [str(samples), str(hot)], maps)
     check(hot.read_text().split()[0] == "f_80001000", "hotlist.py: the lifted function named from the ELF symbols, first")
     sys.path.insert(0, str(SCRIPTS))
     import prof
-    addrs, names = prof.load_symbols(str(maps))["hookshot"]
+    addrs, names = prof.load_symbols(str(maps))["longshot"]
     check("prof_symbol_probe" in names and addrs[names.index("prof_symbol_probe")] == probe,
           "prof.load_symbols: the symbol's offset is the one a sample gives")
 
 
 def main():
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    sys.path.insert(0, str(SCRIPTS))
+    import prof
+    symbols = [
+        "mkwvk::(anonymous namespace)::build_descriptors(int)",
+        "mkwvk::(anonymous namespace)::texture_view_of(unsigned int)",
+        "mkwvk::Recorder::operator()(int)",
+        "mkwvk::Recorder::operator()(float)",
+    ]
+    output = "\n".join("%016x t %s" % (0x1000 + i * 16, name)
+                       for i, name in enumerate(symbols))
+    with patch.object(prof.subprocess, "run", return_value=SimpleNamespace(stdout=output)):
+        addresses, names = prof.load_elf("synthetic.so")
+    check(names == symbols and addresses == [0x1000, 0x1010, 0x1020, 0x1030],
+          "anonymous namespace functions and overloaded operators keep distinct names")
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--cc", default="cc")
     a = p.parse_args()

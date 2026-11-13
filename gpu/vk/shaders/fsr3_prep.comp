@@ -1,5 +1,5 @@
 #version 450
-// (hookshot) AMD FSR 3.1's inputs for OoT's gameplay upscale (vk_fsr3_inputs.cpp), at the render size, in one pass. The
+// (longshot) AMD FSR 3.1's inputs for OoT's gameplay upscale (vk_fsr3_inputs.cpp), at the render size, in one pass. The
 // same inputs, from the same math, as NVIDIA DLSS's (dlss_prep.comp, #841), so the two upscalers see one picture:
 //  - colour: the network's input as it samples it (the square root of the scene's tonemapped colour, its perceptual
 //    encoding), clamped to 0..1; a NaN is 0, as one would stay in FSR's history for good. vk_fsr3.cpp's output pass squares

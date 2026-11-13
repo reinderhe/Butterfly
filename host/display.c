@@ -20,6 +20,9 @@
 void rx_close_asked(void);   /* host/rx_backend.c */
 #include "../gpu/vk/vk_api.h"
 #include "display_pointer.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
+#endif
 
 void hos_relaunch_ask(void);        /* (host/hos_relaunch.c) */
 void hos_window_closed_exit(void);
@@ -137,7 +140,7 @@ static void set_fullscreen(HWND w, int on) {
 }
 
 static void dpi_aware_thread(void) {
-    if (getenv("HOS_DPI_UNAWARE")) return;
+    if (env_on("HOS_DPI_UNAWARE")) return;
     typedef void *(WINAPI * SetCtx)(void *);
     SetCtx set = (SetCtx)(void *)GetProcAddress(GetModuleHandleA("user32.dll"), "SetThreadDpiAwarenessContext");
     if (set) set((void *)(intptr_t)-4);
@@ -151,6 +154,8 @@ static UINT window_dpi(HWND w) {
 }
 
 static void mouse_capture(HWND w, int on) {
+    int rx_option(int id, int otherwise);
+    if (on && rx_option(6, 0) == 2) return;   /* (Mouse camera Off: the mouse plays no part) */
     if (on == (int)mouse_captured) return;
     mouse_captured = on;
     InterlockedExchange(&mouse_dx, 0);
@@ -210,8 +215,10 @@ static void menus_mouse(HWND w, int insert_open, int game_open) {
     hos_pointer_reset(&game_pointer);
     pointer_update(w, 0, 0);
 }
-static void menu_mouse(HWND w, int open) {
-    if (open != menu_open) menus_mouse(w, open, game_menu_open);
+static void menu_mouse(HWND w, int open, int opened_by_escape) {
+    if (open == menu_open) return;
+    if (!opened_by_escape) esc_had_capture = 0;
+    menus_mouse(w, open, game_menu_open);
 }
 
 /* (host/oot_menu.c, the game's thread) one of the game's menus ran this frame */
@@ -301,7 +308,7 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         pointer_update(w, 0, 0);
         return 0;
     case WM_APP + 8:   /* (the Insert menu opened or closed: gpu/vk/vk_menu.cpp) */
-        menu_mouse(w, (int)wp);
+        menu_mouse(w, (int)wp, wp && lp);
         return 0;
     case WM_APP + 10:   /* (a game menu opened: hos_mouse_game_menu) */
         if (!game_menu_open) menus_mouse(w, menu_open, 1);
@@ -311,7 +318,7 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_TIMER: {
         pointer_update(w, 0, 0);
-        /* (hookshot, #1532) a controller is not input to Windows: playing with one, the display went off at the power
+        /* (longshot, #1532) a controller is not input to Windows: playing with one, the display went off at the power
            plan's timeout. While the game's window is in front and not minimized, the display's idle timer is reset every
            30 s (ES_DISPLAY_REQUIRED without ES_CONTINUOUS: nothing is held when the game is left or closed).
            HOS_KEEP_DISPLAY=0: Windows' timeout as before */
@@ -391,6 +398,7 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     case WM_KILLFOCUS:
     case WM_CANCELMODE:
+        esc_had_capture = 0;
         mouse_capture(w, 0);
         hos_pointer_reset(&pointer);
         hos_pointer_reset(&game_pointer);
@@ -440,7 +448,7 @@ static DWORD WINAPI display_main(void *p) {
     (void)p;
     {   /* (nothing is typed here. Windows' text services, set up under DefWindowProc as the window was sized, ended the process: a
            fail-fast in CoreMessaging, called from textinputframework) */
-        HMODULE imm = LoadLibraryExA("imm32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);   /* (hookshot: System32's only) */
+        HMODULE imm = LoadLibraryExA("imm32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);   /* (longshot: System32's only) */
         BOOL (WINAPI *ime_off)(DWORD) = imm ? (BOOL (WINAPI *)(DWORD))GetProcAddress(imm, "ImmDisableIME") : NULL;
         if (ime_off) ime_off((DWORD)-1);
     }
@@ -451,7 +459,7 @@ static DWORD WINAPI display_main(void *p) {
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hIcon = LoadIconA(wc.hInstance, MAKEINTRESOURCEA(1));   /* (nx2/make_icon.py; none in a build without the picture) */
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wc.lpszClassName = "Hookshot";
+    wc.lpszClassName = "Longshot";
     RegisterClassA(&wc);
     dpi_aware_thread();
     extern float hos_aspect_ratio;
@@ -463,8 +471,8 @@ static DWORD WINAPI display_main(void *p) {
     }
     RECT r = {0, 0, win_w, win_h};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    const int noactivate = getenv("HOS_WINDOW_NOACTIVATE") != NULL;
-    hwnd = CreateWindowA("Hookshot", HOS_GAME_TITLE, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+    const int noactivate = env_on("HOS_WINDOW_NOACTIVATE");
+    hwnd = CreateWindowA("Longshot", HOS_GAME_TITLE, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                          CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, NULL, NULL, wc.hInstance, NULL);
     if (!hwnd) display_start_failed("CreateWindowA");
     if (window_dpi(hwnd) != 96) {
@@ -494,7 +502,7 @@ static DWORD WINAPI display_main(void *p) {
     return 0;
 }
 
-/* (hookshot) The game's first work for the GPU waits for the renderer. It ran beside the renderer's start, and what it submitted while the
+/* (longshot) The game's first work for the GPU waits for the renderer. It ran beside the renderer's start, and what it submitted while the
    shaders were being prepared (80 s on a first start) was lost: that run had no ambient light, black foliage and dark characters. The
    game itself goes on starting as it did: held at the start instead, it left holes in the ground */
 void hos_renderer_wait(void) {
@@ -503,7 +511,7 @@ void hos_renderer_wait(void) {
 }
 
 void hos_display_start(void) {
-    if (getenv("HOS_HEADLESS")) {   /* no window: the renderer still draws, offscreen (screenshots, frame dumps) */
+    if (env_on("HOS_HEADLESS")) {   /* no window: the renderer still draws, offscreen (screenshots, frame dumps) */
         rx_start(NULL);
         return;
     }

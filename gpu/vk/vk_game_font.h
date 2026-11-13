@@ -1,4 +1,4 @@
-// (hookshot) The game's own menu font, read from the player's game files, in memory only (vk_imgui.cpp; never written anywhere).
+// (longshot) The game's own menu font, read from the player's game files, in memory only (vk_imgui.cpp; never written anywhere).
 // romfs/Font2/Scalable/<name>.Nin_Ounce_NVN2.bfotf.zs is zstd with the dictionary zs.zsdic, kept in the SARC archive
 // romfs/Pack/ZsDic.pack.zs (zstd, no dictionary). The .bfotf in it is an OpenType font behind an 8-byte header, XOR-ed with a
 // 4-byte key: the first little-endian word is 0x18029a7f XOR the key, the second the font's size (big-endian) XOR the key.
@@ -118,6 +118,15 @@ struct Reader {
         if (read_file(romfs + "Pack/ZsDic.pack.zs", packed) && unzstd(packed, nullptr, pack) && sarc_file(pack, "zs.zsdic", zsdic))
             dict = ZSTD_createDDict(zsdic.data(), zsdic.size());
         return dict != nullptr;
+    }
+    /// A font of another script by name, for the menu's fallback letters (vk_imgui.cpp script_fonts): the .bfotf or the .bfttf,
+    /// whatever letters it has; empty when the files do not have it
+    std::vector<unsigned char> read_script(const char* name) const {
+        std::vector<unsigned char> packed, raw;
+        if (!dict) return {};
+        for (const char* ext : {".Nin_Ounce_NVN2.bfotf.zs", ".Nin_Ounce_NVN2.bfttf.zs"})
+            if (read_file(romfs + "Font2/Scalable/" + name + ext, packed) && unzstd(packed, dict, raw)) return bfotf_font(raw);
+        return {};
     }
     /// A font by name ("ClarimoUDPE-Regular"); empty when the files do not have it, or it has no Latin letters
     std::vector<unsigned char> read(const char* name) const {

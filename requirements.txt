@@ -1,4 +1,4 @@
-# Hookshot build / tools Python deps. From the clone:
+# Longshot build / tools Python deps. From the clone:
 #   python -m pip install -r requirements.txt
 #
 # Pins match scripts/linux/deps.sh (AppImage Python). Button-prompt packages are

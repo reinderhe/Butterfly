@@ -1,11 +1,11 @@
-"""The SPIR-V Hookshot's translator kept in hookshot_programs.bin, checked offline before a driver sees it again.
+"""The SPIR-V Longshot's translator kept in longshot_programs.bin, checked offline before a driver sees it again.
 
 Each stage goes through the Vulkan SDK's spirv-val, and through the device limits spirv-val does not know: the workgroup's
 invocations and its workgroup memory (the mesh fallback keeps a mesh program's outputs there, on top of the game's own
 shared memory). A stage that fails is written to --out as <key>_<n>_<stage>.spv, its disassembly (.spvasm, spirv-dis) and
 the reasons (.txt); the summary groups the validator's errors by message.
 
-python -I scripts/validate_spirv.py "D:\\Games\\Hookshot\\hookshot_programs.bin"          (the mesh-as-compute programs)
+python -I scripts/validate_spirv.py "D:\\Games\\Longshot\\longshot_programs.bin"          (the mesh-as-compute programs)
 python -I scripts/validate_spirv.py <file> --all                                        (every program)
 python -I scripts/validate_spirv.py <file> --key a5da9f84b72d1471                       (the programs whose key starts so)
 
@@ -35,7 +35,7 @@ def records(path, want):
     with open(path, "rb") as f:
         head = f.read(16)
         if len(head) < 16 or struct.unpack_from("<I", head)[0] != CACHE_MAGIC:
-            raise SystemExit("%s: not a Hookshot program cache" % path)
+            raise SystemExit("%s: not a Longshot program cache" % path)
         while True:
             rec = f.read(16)
             if len(rec) < 16:
@@ -162,11 +162,11 @@ def dump(out, job, reasons, local, shared, dis):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("cache", help="hookshot_programs.bin")
+    p.add_argument("cache", help="longshot_programs.bin")
     p.add_argument("--all", action="store_true", help="every program, not only the mesh-as-compute ones")
     p.add_argument("--key", action="append", default=[], help="a program key (hex) or its start; may be given again")
     p.add_argument("--out", help="where failing stages are written (default: spirv_failures beside the cache)")
-    p.add_argument("--target-env", default="vulkan1.3", help="spirv-val's target (Hookshot asks for Vulkan 1.3)")
+    p.add_argument("--target-env", default="vulkan1.3", help="spirv-val's target (Longshot asks for Vulkan 1.3)")
     p.add_argument("--val-arg", action="append", default=[], help="an argument passed on to spirv-val")
     p.add_argument("--max-shared", type=int, default=65536, help="maxComputeSharedMemorySize (RDNA1: 65536)")
     p.add_argument("--max-invocations", type=int, default=1024, help="maxComputeWorkGroupInvocations (RDNA1: 1024)")

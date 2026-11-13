@@ -2,7 +2,7 @@
 // Eglantine's recompiler, offline and CPU-only: every stage it can lower goes to SPIR-V, and every program key is
 // computed exactly as gpu/vk/vk_shader.cpp computes it. No Vulkan device: nothing here calls vkCreateShaderModule
 // or vkCreate*Pipeline, so the pass runs where no GPU is (nx2/bake_mimo.py builds and runs this).
-//   shaderbatch <hookshot_shaders.bin> <out_dir> [--limit N]
+//   shaderbatch <longshot_shaders.bin> <out_dir> [--limit N]
 // writes:
 //   <out_dir>/stages.tsv      one line per seed stage: its code_key, NVN stage, status, sizes, translation facts
 //   <out_dir>/programs.tsv    one line per program x input variant: the runtime's program key and what became of it
@@ -12,7 +12,7 @@
 // Shader::Stage an NVN stage number becomes, Profile/HostTranslateInfo, and the RuntimeInfo each stage's emit takes.
 // What it cannot know with no game running: the bound textures' answers (Program::answers, the variants of
 // seed_compute), the driver constant banks (ReadCbufValue is the program's own c1 only), and the device limits in
-// min_ssbo_alignment (16 here). Those are what a Vulkan machine fills in — BAKE.md §3 (machine stop-lines).
+// min_ssbo_alignment (16 here). Those are what a Vulkan machine fills in — docs/BAKE.md §3 (machine stop-lines).
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -38,7 +38,7 @@
 #include "shader_recompiler/frontend/maxwell/control_flow.h"
 #include "shader_recompiler/frontend/maxwell/translate_program.h"
 #include "shader_recompiler/host_translate_info.h"
-#include "shader_recompiler/ir_opt/oot_visual_workaround.h"
+#include "shader_recompiler/ir_opt/fragment_output_guard.h"
 #include "shader_recompiler/object_pool.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/program_header.h"
@@ -407,7 +407,7 @@ struct EmitOut {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: shaderbatch <hookshot_shaders.bin> <out_dir> [--limit N]\n");
+        std::fprintf(stderr, "usage: shaderbatch <longshot_shaders.bin> <out_dir> [--limit N]\n");
         return 2;
     }
     size_t limit = ~size_t{0};

@@ -7,6 +7,9 @@ import shutil
 import subprocess
 import tempfile
 
+# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
+ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
+
 ROOT = Path(__file__).resolve().parents[1]
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 CASES = ("mirror_off", "upload_off", "refused", "virtual_write", "large_write", "no_recording",
@@ -58,12 +61,12 @@ def main():
     flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if os.name == "nt" else 0
     env = dict(os.environ)
     env["PATH"] = str(Path(cxx).parent) + os.pathsep + env.get("PATH", "")
-    with tempfile.TemporaryDirectory(prefix="hookshot-direct-writes-") as folder:
+    with tempfile.TemporaryDirectory(prefix="longshot-direct-writes-") as folder:
         tmp = Path(folder)
         (tmp / "direct_write_types.inc").write_text(types + "\n", encoding="utf-8")
         (tmp / "direct_write_actual.inc").write_text(actual + "\n", encoding="utf-8")
         exe = tmp / ("direct_writes.exe" if os.name == "nt" else "direct_writes")
-        command = [cxx, "-std=c++20", "-O0", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS",
+        command = [cxx, "-std=c++20", "-include", ENV_ON_H, "-O0", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS",
                    "-I" + str(tmp), str(ROOT / "tests/direct_buffer_writes_test.cpp"), "-o", str(exe)]
         result = subprocess.run(command, cwd=tmp, env=env, capture_output=True, text=True, timeout=60,
                                 creationflags=flags)

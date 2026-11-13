@@ -51,7 +51,7 @@ def main():
         if body.index(start) > body.index("OpLoopMerge"):
             raise SystemExit("%s sets its count inside the loop" % name)
     # (the global narrow stores: one loop body used twice, so the count is declared in the entry block and reset by each)
-    marker = "// (hookshot) 8- and 16-bit global stores:"
+    marker = "// (longshot) 8- and 16-bit global stores:"
     if marker in source:
         glob = block(source, marker)
         loop = block(glob, "const auto cas_loop{[&](Id pointer)")
@@ -64,7 +64,7 @@ def main():
             raise SystemExit("the global stores leave only on success")
     # (ATOMG.CAS's own function is one compare-exchange that returns what it read, no loop: nothing to end)
     single = 0
-    marker = "// (hookshot) ATOMG.CAS's:"
+    marker = "// (longshot) ATOMG.CAS's:"
     if marker in source:
         single = block(source[source.index(marker):], "const auto cas{[&](Id pointer)").count("OpAtomicCompareExchange(")
     exchanges = source.count("OpAtomicCompareExchange(") - single

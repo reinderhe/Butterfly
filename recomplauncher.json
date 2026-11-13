@@ -1,8 +1,7 @@
 {
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
-  "name": "Hookshot",
-  "repo": "NotRexed/Hookshot",
+  "name": "Longshot",
   "game": {
     "kind": "iso_or_folder",
     "label": "Your copy of The Legend of Zelda: Ocarina of Time for Nintendo Switch 2, version 131072 (build e0f3ccfa): the .nup file, or the folder that holds its romfs and exefs.",
@@ -12,18 +11,18 @@
   },
   "start": {
     "program": [
-      "Hookshot.AppImage",
-      "HookshotBuilder.exe"
+      "Longshot.AppImage",
+      "LongshotBuilder.exe"
     ],
     "args": [
       "--play",
-      "{home}/Games/Hookshot"
+      "{home}/Games/Longshot"
     ]
   },
   "prepare": {
     "program": [
-      "Hookshot.AppImage",
-      "HookshotBuilder.exe"
+      "Longshot.AppImage",
+      "LongshotBuilder.exe"
     ],
     "args": [
       "--cli",
@@ -31,7 +30,7 @@
       "--game",
       "{game}"
     ],
-    "label": "Building the game from your copy (10 to 45 minutes)",
+    "label": "Building the game from your copy (15 to 30 minutes)",
     "timeout": 7200
   },
   "config": [
@@ -40,28 +39,28 @@
       "format": "ini",
       "file": [
         {
-          "path": "{home}/Games/Hookshot/hookshot_options.ini"
+          "path": "{home}/Games/Longshot/longshot_options.ini"
         }
       ]
     }
   ],
   "saves": [
-    "{local}/hookshot",
-    "{home}/Games/Hookshot/user"
+    "{local}/longshot",
+    "{home}/Games/Longshot/user"
   ],
   "folders": {
     "saves": [
       {
-        "path": "{home}/Games/Hookshot/user",
-        "if": "{home}/Games/Hookshot/user"
+        "path": "{home}/Games/Longshot/user",
+        "if": "{home}/Games/Longshot/user"
       },
       {
-        "path": "{local}/hookshot"
+        "path": "{local}/longshot"
       }
     ],
     "game": [
       {
-        "path": "{home}/Games/Hookshot"
+        "path": "{home}/Games/Longshot"
       }
     ]
   },
@@ -356,8 +355,8 @@
     },
     {
       "id": "ultrawide",
-      "label": "Ultrawide",
-      "help": "Monitor's shape widens the camera to fill a screen wider than 16:9. The HUD stays stretched. Applies after a restart.",
+      "label": "Aspect ratio",
+      "help": "The picture's shape: your monitor's (the default: wider on an ultrawide, narrower on 4:3 or 16:10), or the game's 16:9. Applies after a restart.",
       "choices": [
         {
           "label": "16:9",
@@ -373,7 +372,7 @@
         }
       ],
       "defaults": {
-        "ultrawide": "0"
+        "ultrawide": "1"
       }
     },
     {
@@ -496,6 +495,28 @@
       ],
       "defaults": {
         "mouse_camera": "0"
+      }
+    },
+    {
+      "id": "compile_shaders",
+      "label": "Compile shaders",
+      "help": "All: also builds the predicted pipelines, about 40% longer, for pipelines play almost never uses. Most (recommended): every shader and the pipelines the game is known to use. Applies at the next build, update or preparation.",
+      "choices": [
+        {
+          "label": "All",
+          "set": {
+            "compile_shaders": "1"
+          }
+        },
+        {
+          "label": "Most (recommended)",
+          "set": {
+            "compile_shaders": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "compile_shaders": "0"
       }
     }
   ],

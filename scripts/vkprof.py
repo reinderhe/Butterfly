@@ -1,6 +1,6 @@
 """The renderer's threads from an all-thread sample (host/mkw_glue.c HOS_SAMPLE_ALL): for the threads whose name starts
 with a prefix (default mkw_vk), the share of samples running, and the functions by inclusive and self share of the
-running samples (leaf in hookshot_vk.dll, hookshot.exe or the driver; on Linux hookshot_vk.so, hookshot or the driver).
+running samples (leaf in longshot_vk.dll, longshot.exe or the driver; on Linux longshot_vk.so, longshot or the driver).
 
     python -I scripts/vkprof.py work/runs/<run>_all.txt [top 40] [prefix mkw_vk]
     (RX_MAPS=<folder>: another build's linker maps, or on Linux the game folder)

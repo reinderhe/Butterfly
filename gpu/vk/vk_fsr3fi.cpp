@@ -1,4 +1,4 @@
-// (hookshot) FSR 3 frame interpolation's pipelines, internal images and dispatches; see vk_fsr3fi.h
+// (longshot) FSR 3 frame interpolation's pipelines, internal images and dispatches; see vk_fsr3fi.h
 // for what it is for and where it slots in.
 //
 // The resource table, the per-pass binding lists, the pass order and the dispatch sizes are AMD's,

@@ -1,13 +1,13 @@
 """Windows paths as UTF-8: the game exe's manifest makes its code page UTF-8 (nx2/win_manifest.py), so a game folder named
 outside the system's ANSI code page (Japanese on a Western Windows, an emoji anywhere) opens; before, the game closed at start.
 
-Everywhere: the manifest resource's bytes, that nx2/build.py links it into hookshot.exe, that host/hos_main.c checks at start,
+Everywhere: the manifest resource's bytes, that nx2/build.py links it into longshot.exe, that host/hos_main.c checks at start,
 and that host/ and gpu/vk convert no text with the ANSI code page (CP_ACP and the like: UTF-8 is the one code page of the game's
 char strings). With a compiler for Windows: tests/utf8_paths_test.c (host/hos_main.c's narrow_paths_ok pasted in) built with the
 manifest, and once without it. On Windows both run from a folder named "ゲーム Zélda 🎮": with the manifest the A functions,
-fopen, argv, getenv and the log (stderr freopen'd, as hookshot_log.txt) are UTF-8 and the paths round-trip; without it the
+fopen, argv, getenv and the log (stderr freopen'd, as longshot_log.txt) are UTF-8 and the paths round-trip; without it the
 start-up check refuses the folder (as the game used to fail).
-Elsewhere the build is checked to carry the manifest resource (HOOKSHOT_MINGW=<llvm-mingw> on Linux).
+Elsewhere the build is checked to carry the manifest resource (LONGSHOT_MINGW=<llvm-mingw> on Linux).
 
     python -I tests/test_utf8_paths.py [--cc <clang for Windows>]
 """
@@ -52,21 +52,23 @@ def check_manifest():
     root = ET.fromstring(entries[1][3])
     page = root.findall(".//{http://schemas.microsoft.com/SMI/2019/WindowsSettings}activeCodePage")
     assert len(page) == 1 and page[0].text == "UTF-8", "activeCodePage UTF-8"
+    heap = root.findall(".//{http://schemas.microsoft.com/SMI/2020/WindowsSettings}heapType")
+    assert len(heap) == 1 and heap[0].text == "SegmentHeap", "heapType SegmentHeap (gpu/vk/prepare_workers.h)"
     level = root.find(".//{urn:schemas-microsoft-com:asm.v3}requestedExecutionLevel")
     assert level is not None and level.get("level") == "asInvoker", "no elevation asked for"
 
 
 def check_build_links_it():
     src = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
-    start = src.index('exe = os.path.join(out, "hookshot.exe")')
+    start = src.index('exe = os.path.join(out, "longshot.exe")')
     link = src[start:src.index("capture_output=True", start)]
-    assert "win_manifest.write(" in link, "nx2/build.py links hookshot.exe without nx2/win_manifest.py's resource"
+    assert "win_manifest.write(" in link, "nx2/build.py links longshot.exe without nx2/win_manifest.py's resource"
 
 
 def check_start_up():
     src = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
     main = src.index("int main(int argc, char **argv) {\n#else")
-    first = src[main:src.index("load_hookshot_env();", main)]
+    first = src[main:src.index("load_longshot_env();", main)]
     assert "narrow_paths_ok(argc, argv)" in first, "host/hos_main.c's main checks its folder's path before anything opens a file"
 
 
@@ -95,12 +97,12 @@ def narrow_paths_ok_source():
 
 
 def windows_cc(given):
-    """a C compiler that makes Windows programs: --cc, else clang on Windows, else llvm-mingw's (HOOKSHOT_MINGW)"""
+    """a C compiler that makes Windows programs: --cc, else clang on Windows, else llvm-mingw's (LONGSHOT_MINGW)"""
     if given:
         return given
     if os.name == "nt":
         return shutil.which("clang")
-    mingw = os.environ.get("HOOKSHOT_MINGW", "")
+    mingw = os.environ.get("LONGSHOT_MINGW", "")
     cc = os.path.join(mingw, "bin", "x86_64-w64-mingw32-clang")
     return cc if mingw and os.path.exists(cc) else None
 
@@ -117,25 +119,26 @@ def has_manifest(exe, mingw):
 def check_probe(cc_arg):
     cc = windows_cc(cc_arg)
     if not cc:
-        print("SKIP probe: no compiler for Windows here (clang on Windows, or HOOKSHOT_MINGW=<llvm-mingw>)")
+        print("SKIP probe: no compiler for Windows here (clang on Windows, or LONGSHOT_MINGW=<llvm-mingw>)")
         return
     template = (ROOT / "tests" / "utf8_paths_test.c").read_text(encoding="utf-8")
     assert template.count("/* ACTUAL_NARROW_PATHS_OK */") == 1
-    with tempfile.TemporaryDirectory(prefix="hookshot-utf8-") as temp:
+    with tempfile.TemporaryDirectory(prefix="longshot-utf8-") as temp:
         build = Path(temp) / "build"
         run_dir = Path(temp) / "ゲーム Zélda 🎮"
         build.mkdir()
         run_dir.mkdir()
         source = build / "probe.c"
         source.write_text(template.replace("/* ACTUAL_NARROW_PATHS_OK */", narrow_paths_ok_source()), encoding="utf-8")
-        res = win_manifest.write(str(build / "hookshot_manifest.res"))
+        res = win_manifest.write(str(build / "longshot_manifest.res"))
         target = [] if os.name == "nt" or "mingw32" in os.path.basename(cc) else ["--target=x86_64-w64-mingw32"]
-        flags = target + ["-std=c11", "-O0", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-fuse-ld=lld"]
+        flags = target + ["-std=c11", "-O0", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-fuse-ld=lld",
+                          "-include", str(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h")]   # (env_on: narrow_paths_ok's)
         libs = ["-luser32"]
         with_manifest, without = build / "probe.exe", build / "probe_ansi.exe"
         subprocess.run([cc] + flags + [str(source), res, "-o", str(with_manifest)] + libs, check=True)
         subprocess.run([cc] + flags + [str(source), "-o", str(without)] + libs, check=True)
-        mingw = os.environ.get("HOOKSHOT_MINGW", "")
+        mingw = os.environ.get("LONGSHOT_MINGW", "")
         found = has_manifest(with_manifest, mingw)
         if found is not None:
             assert found, "the linked exe carries no RT_MANIFEST"
@@ -147,7 +150,7 @@ def check_probe(cc_arg):
             copy = run_dir / exe.name
             shutil.copyfile(exe, copy)
             env = dict(os.environ, HOS_HEADLESS="1")
-            r = subprocess.run([str(copy), mode, "Hookshot-DLSS ゼルダ Zélda"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+            r = subprocess.run([str(copy), mode, "Longshot-DLSS ゼルダ Zélda"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
                                cwd=str(run_dir))
             print(r.stdout.strip())
             assert r.returncode == 0, "%s %s: %s%s" % (exe.name, mode, r.stdout, r.stderr)

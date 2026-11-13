@@ -1,4 +1,4 @@
-"""The pipeline notes file (hookshot_pipelines.bin) and the pipeline state list are opened by the precompile, before play, with
+"""The pipeline notes file (longshot_pipelines.bin) and the pipeline state list are opened by the precompile, before play, with
 the notes it has just read, not at the first new pipeline in play.
 
 pipeline_note opened the notes file at the first new pipeline of a run and read its keys back with a seek and an 8-byte read
@@ -30,7 +30,7 @@ class PipelineNotesOpenTests(unittest.TestCase):
         cls.draw = (ROOT / "gpu" / "vk" / "vk_draw.cpp").read_text(encoding="utf-8")
 
     def test_pipeline_note_opens_through_the_shared_function(self):
-        note = block(self.draw, "void pipeline_note(uint64_t key")
+        note = block(self.draw, "bool pipeline_note(uint64_t key")
         self.assertIn("if (!note_file) notes_open_locked(nullptr);", note)
         self.assertNotIn("_fseeki64", note)
 
@@ -49,7 +49,7 @@ class PipelineNotesOpenTests(unittest.TestCase):
         open_ = block(self.draw, "void state_open_locked()")
         # (the records as the file has them, hashed as state_record hashes the ones it writes; a version 1 list kept aside)
         self.assertIn("while (fread(&r, sizeof r, 1, f) == 1) state_seen.insert(state_hash(r))", open_)
-        self.assertIn('state_list_path("hookshot_pipeline_states_v1.bin")', open_)
+        self.assertIn('state_list_path("longshot_pipeline_states_v1.bin")', open_)
 
     def test_the_precompile_opens_both_before_play_with_the_notes_it_read(self):
         run = block(self.draw, "void precompile_run(void (*progress)(size_t done, size_t total))")
@@ -59,8 +59,8 @@ class PipelineNotesOpenTests(unittest.TestCase):
         self.assertLess(read, notes)
         self.assertLess(notes, run.index("program_cache_load_some("))
         self.assertLess(states, run.index("program_cache_load_some("))
-        self.assertIn('if (!getenv("RX_VK_NO_PROGRAM_CACHE"))', run[read:notes])
-        self.assertIn('if (!getenv("RX_VK_NO_STATE_LIST"))', run[notes:states])
+        self.assertIn('if (!env_on("RX_VK_NO_PROGRAM_CACHE"))', run[read:notes])
+        self.assertIn('if (!env_on("RX_VK_NO_STATE_LIST"))', run[notes:states])
         self.assertIn("std::lock_guard lk(note_mu);", run[read:notes])
         self.assertIn("std::lock_guard lk(state_mu);", run[notes:states])
 

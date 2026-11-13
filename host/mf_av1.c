@@ -1,4 +1,4 @@
-/* (hookshot) An AV1 decoder on Media Foundation, for nn::codec's AV1 decoder (host/nn_video.c).
+/* (longshot) An AV1 decoder on Media Foundation, for nn::codec's AV1 decoder (host/nn_video.c).
 
    OoT's movies (romfs/Movie: the intro, ...) are AV1, and the static FFmpeg the build links has no AV1 decoder (its
    native one needs a hardware context; dav1d / libaom are not in it). Windows has one: the decoder MFT of the AV1
@@ -19,6 +19,9 @@
 #include <mftransform.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
+#endif
 
 #ifndef MFVideoFormat_AV1
 DEFINE_GUID(MFVideoFormat_AV1_local, 0x31305641, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
@@ -70,13 +73,13 @@ static int set_output_nv12(MfAv1 *m) {
     return 1;
 }
 
-/* (hookshot) Without the AV1 Video Extension the movies have no decoder: their pictures stay empty, which shows as a green screen, and the
+/* (longshot) Without the AV1 Video Extension the movies have no decoder: their pictures stay empty, which shows as a green screen, and the
    intro never ends. Said once, on its own thread (the game goes on), with the way to the Store page. HOS_AV1_MISSING=1: as if it were missing */
 static DWORD WINAPI av1_missing_notice(LPVOID unused) {
     (void)unused;
-    if (MessageBoxA(NULL, "Hookshot's movies need Microsoft's free AV1 Video Extension, which this PC does not have. Without it they show a green "
+    if (MessageBoxA(NULL, "Longshot's movies need Microsoft's free AV1 Video Extension, which this PC does not have. Without it they show a green "
                           "screen and the game can stop at a black screen.\n\nOpen its Microsoft Store page now? Install it, then restart the game.",
-                    "Hookshot", MB_YESNO | MB_ICONINFORMATION | MB_TOPMOST) == IDYES)
+                    "Longshot", MB_YESNO | MB_ICONINFORMATION | MB_TOPMOST) == IDYES)
         ShellExecuteA(NULL, "open", "ms-windows-store://pdp/?ProductId=9MVZQVXJBQ9V", NULL, NULL, SW_SHOWNORMAL);
     return 0;
 }
@@ -90,11 +93,11 @@ static void av1_missing(void) {
 
 void *mf_av1_open(int w, int h) {
     if (!com_ready()) return NULL;
-    if (getenv("HOS_AV1_MISSING")) { av1_missing(); return NULL; }
+    if (env_on("HOS_AV1_MISSING")) { av1_missing(); return NULL; }
     MFT_REGISTER_TYPE_INFO in = {MFMediaType_Video, MFVideoFormat_AV1};
     IMFActivate **acts = NULL;
     UINT32 n = 0;
-    const int prefer_async = getenv("HOS_AV1_ASYNC") != NULL;
+    const int prefer_async = env_on("HOS_AV1_ASYNC");
     const UINT32 tries[2] = {prefer_async ? MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_ASYNCMFT : MFT_ENUM_FLAG_SYNCMFT,
                              prefer_async ? MFT_ENUM_FLAG_SYNCMFT : MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_ASYNCMFT};
     IMFTransform *mft = NULL;

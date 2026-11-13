@@ -21,7 +21,7 @@ def extract(source):
     if marker.startswith("static RunResult"):
         start = source.rindex("typedef struct {", 0, start)
     call_start = source.index("            GetSystemDirectoryW(sys, MAX_PATH);")
-    call_end = source.index('            if (strcmp(p->from, "-")', call_start)
+    call_end = source.index('            {   /* (the tool\'s prefix folder, moved in as dest) */', call_start)
     return source[start:end], source[call_start:call_end]
 
 
@@ -38,7 +38,7 @@ def main():
     code = template.replace("/* ACTUAL_HELPER */", helper).replace("/* ACTUAL_CALL */", call)
     priority = {"creationflags": (getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0))}
     rows = []
-    with tempfile.TemporaryDirectory(prefix="hookshot-tar-diagnostics-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="longshot-tar-diagnostics-") as temporary:
         folder = Path(temporary)
         source, executable = folder / "fixture.c", folder / "fixture.exe"
         source.write_text(code, encoding="utf-8")

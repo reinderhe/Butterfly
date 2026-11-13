@@ -10,8 +10,8 @@ import sys
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 FONTS = os.path.join(ROOT, "third_party", "fonts", "libertinus")
 # (the symbol, the file: vk_imgui.cpp declares the same names)
-FILES = (("hookshot_font_body", "LibertinusSans-Regular.ttf"), ("hookshot_font_strong", "LibertinusSans-Bold.ttf"),
-         ("hookshot_font_heading", "LibertinusSerif-Semibold.ttf"))
+FILES = (("longshot_font_body", "LibertinusSans-Regular.ttf"), ("longshot_font_strong", "LibertinusSans-Bold.ttf"),
+         ("longshot_font_heading", "LibertinusSerif-Semibold.ttf"))
 
 
 def source():

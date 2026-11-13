@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
 
 def scopes(source):
     """The sampled timers, from their comment to the namespace's end, and the PROF macros"""
-    start = source.index("// (hookshot) The per-draw phases (PROF_HOT)")
+    start = source.index("// (longshot) The per-draw phases (PROF_HOT)")
     end = source.index("} // namespace mkwvk", start)
     macros = [line for line in source[end:].splitlines() if line.startswith("#define PROF")]
     if len(macros) != 3:
@@ -173,7 +173,8 @@ def main():
         cpp = Path(tmp) / "fixture.cpp"
         exe = Path(tmp) / "fixture.exe"
         cpp.write_text(fixture, encoding="utf-8")
-        subprocess.run([a.cxx, "-std=c++20", "-O1", "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(exe)], check=True)
+        subprocess.run([a.cxx, "-std=c++20", "-include", str(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h"), "-O1", "-Wall",
+                        "-Wextra", "-Werror", str(cpp), "-o", str(exe)], check=True)   # (env_on: RX_VK_PROF_ALL)
         env = {k: v for k, v in os.environ.items() if k not in ("RX_VK_PROF_ALL", "RX_VK_SLOW_LOG")}
         subprocess.run([str(exe)], check=True, env=env)
         subprocess.run([str(exe), "all"], check=True, env=dict(env, RX_VK_PROF_ALL="1"))

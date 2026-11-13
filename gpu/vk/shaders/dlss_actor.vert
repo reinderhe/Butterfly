@@ -1,7 +1,7 @@
 #version 450
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
-// (hookshot) NVIDIA DLSS's actor motion (vk_dlss.cpp): a skinned draw of the scene drawn again, its vertices skinned with this
+// (longshot) NVIDIA DLSS's actor motion (vk_dlss.cpp): a skinned draw of the scene drawn again, its vertices skinned with this
 // frame's bones and with the frame before's, so each pixel it covers gets its own motion and not that of what is behind it.
 // The cameras are in a storage buffer (data): this frame's view-projection as the game drew with it, the jitter in it; the frame
 // before's with its jitter taken off (both row major, clip = M * position); the jitter; the render size. The vertices and
@@ -23,7 +23,9 @@ layout(push_constant) uniform P {
     int base_vertex;
     uint pos, sets;          // (byte offsets in a vertex, the joint and weight sets: 1 or 2)
     uint joints[2], weights[2];
-    uint formats;            // (1: the position RGBA16F, else RGB32F; 2 << set: that set's joints RGBA8UI, else RGBA16UI)
+    uint formats;            // (1: the position RGBA16F, else RGB32F; 2 << set: that set's joints RGBA8UI, else RGBA16UI;
+                             // 8 << set: a single influence, an R8 weight and an R8UI (2 << set) or R16UI joint;
+                             // 32 << set: two, RG8 weights and RG8UI joints; 128 << set: no weight, the joint weighs 1)
     uint tolerance;          // (the fragment stage's)
 } pc;
 layout(location = 0) out vec4 before;
@@ -40,6 +42,10 @@ void skin(Words palette, uvec4 j, vec4 wt, vec4 p, inout vec3 acc) {
         const uint b = j[k] * 12u;
         acc += wt[k] * vec3(dot(row(palette, b), p), dot(row(palette, b + 4u), p), dot(row(palette, b + 8u), p));
     }
+}
+uint byte_at(Words vb, uint o) { return (vb.w[o / 4u] >> ((o & 3u) * 8u)) & 0xffu; }
+uint short_at(Words vb, uint o) {   // (2-aligned in practice; one that straddles a word is put together)
+    return (o & 3u) == 3u ? (byte_at(vb, o) | (byte_at(vb, o + 1u) << 8)) : ((vb.w[o / 4u] >> ((o & 3u) * 8u)) & 0xffffu);
 }
 void main() {
     const uint at = pc.first + uint(gl_VertexIndex);
@@ -61,11 +67,16 @@ void main() {
                                                   uintBitsToFloat(vb.w[q + 2u]), 1.0);
     vec3 now = vec3(0.0), then = vec3(0.0);
     for (uint s = 0u; s < pc.sets; s++) {
-        const uint a = vb.w[pc.joints[s] / 4u];
-        const uvec4 j = (pc.formats & (2u << s)) != 0u ? (uvec4(a, a >> 8, a >> 16, a >> 24) & 0xffu)
-                                                      : uvec4(a & 0xffffu, a >> 16, vb.w[pc.joints[s] / 4u + 1u] & 0xffffu,
-                                                              vb.w[pc.joints[s] / 4u + 1u] >> 16);
-        const vec4 wt = unpackUnorm4x8(vb.w[pc.weights[s] / 4u]);
+        // A set's influences at any byte offset: four (RGBA8 weights, RGBA8UI or RGBA16UI joints), two (kPair:
+        // RG8 / RG8UI), one (kSingle: R8 / R8UI or R16UI), or one weighing 1 (kSingle | kNoWeight: a rigid model on one bone)
+        const uint n = (pc.formats & (8u << s)) != 0u ? 1u : (pc.formats & (32u << s)) != 0u ? 2u : 4u;
+        const bool byte_joints = (pc.formats & (2u << s)) != 0u, no_weight = (pc.formats & (128u << s)) != 0u;
+        uvec4 j = uvec4(0u);
+        vec4 wt = vec4(0.0);
+        for (uint k = 0u; k < n; k++) {
+            j[k] = byte_joints ? byte_at(vb, pc.joints[s] + k) : short_at(vb, pc.joints[s] + 2u * k);
+            wt[k] = no_weight ? 1.0 : float(byte_at(vb, pc.weights[s] + k)) / 255.0;
+        }
         skin(Words(pc.bones[0]), j, wt, p, now);
         skin(Words(pc.bones[1]), j, wt, p, then);
     }

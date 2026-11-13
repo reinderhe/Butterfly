@@ -3,7 +3,7 @@ release AppImage and not only from a source checkout. Runs the real copy block o
 temporary folder; nothing is built.
 
 Issue: the comment above the copy ("the sources the player's build compiles, and the scripts") already said scripts
-belonged here, but the cp -a line itself left scripts out, so HOOKSHOT_NGX_SDK/--fetch-ngx-sdk on a released AppImage
+belonged here, but the cp -a line itself left scripts out, so LONGSHOT_NGX_SDK/--fetch-ngx-sdk on a released AppImage
 failed with FileNotFoundError on scripts/ngx_sdk.py.
 
     python -I -B tests/test_appimage_scripts.py
@@ -29,7 +29,7 @@ class AppImageScripts(unittest.TestCase):
         script = (ROOT / "scripts/linux/appimage.sh").read_text(encoding="utf-8")
         start = script.index("# ---- the tools (the sources")
         end = script.index("cp -a third_party/opus", start)
-        with tempfile.TemporaryDirectory(prefix="hookshot-appimage-scripts-") as folder:
+        with tempfile.TemporaryDirectory(prefix="longshot-appimage-scripts-") as folder:
             env = dict(os.environ, T=folder, VERSION="authored-test")
             result = subprocess.run(["bash", "-eu", "-o", "pipefail", "-c", script[start:end]], cwd=ROOT, env=env,
                                     capture_output=True, text=True)

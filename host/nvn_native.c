@@ -24,13 +24,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
+#endif
 uint64_t hos_hostcall(const char *name, void (*fn)(Ctx *, void *), void *user);   /* hos_hostcall.c */
 void hos_gpu_track(uint64_t guest, uint64_t size, int on);                          /* nvdrv.c */
 
 /* ---- calling convention: arguments from the guest registers ---- */
 #define NV(name) static void n_##name(Ctx *c, void *u_)
 static void die(const char *fmt, ...);
-/* (hookshot) guest memory this layer reads or writes for the game: the n bytes at a, which must lie in the guest window
+/* (longshot) guest memory this layer reads or writes for the game: the n bytes at a, which must lie in the guest window
    (die otherwise). Objects and arrays are guest memory, so their addresses and sizes are checked before use. An
    object argument of no known size (P) is checked for its start (NVN_OBJ_MIN bytes): the window's top region ends at
    the window's end, so an object there may end there too; arrays and objects of known size are checked whole. */
@@ -40,7 +43,7 @@ static void *gw(uint64_t a, uint64_t n) {
     if (!p) die("guest memory %#llx + %#llx is outside the guest window", (unsigned long long)a, (unsigned long long)n);
     return p;
 }
-/* (hookshot) a host pointer read from guest memory (a pool or texture an object names): it must point into the window */
+/* (longshot) a host pointer read from guest memory (a pool or texture an object names): it must point into the window */
 static const void *in_window(const void *p, size_t n) {
     if (!p) return NULL;
     const uintptr_t q = (uintptr_t)p, base = (uintptr_t)A64_MEM;
@@ -61,7 +64,7 @@ static uint64_t h2g(const void *p) { return p ? (uint64_t)((const uint8_t *)p - 
 static void *g2h(uint64_t a) { return a ? gw(a, NVN_OBJ_MIN) : NULL; }
 #define RETP(p) RET(h2g(p))
 
-static int nvn_log_on(void) { static int v = -1; if (v < 0) v = getenv("HOS_NVN_LOG_OBJECTS") != NULL; return v; }
+static int nvn_log_on(void) { static int v = -1; if (v < 0) v = env_on("HOS_NVN_LOG_OBJECTS"); return v; }
 #define OLOG(...) do { if (nvn_log_on()) hos_log("nvn: " __VA_ARGS__); } while (0)
 static void die(const char *fmt, ...) {
     char b[512];
@@ -110,7 +113,7 @@ static void vmap_runs(struct nvn_vmap *m) {   /* (vmap_lock held exclusively) */
                   : i + 1 < n && m->page[i + 1] && m->page[i + 1] == m->page[i] + VPAGE ? m->run[i + 1] + 1 : 1;
 }
 
-/* (hookshot) a virtual pool's page table, from the host's list by the pool's GPU address (the pool object is guest memory) */
+/* (longshot) a virtual pool's page table, from the host's list by the pool's GPU address (the pool object is guest memory) */
 static struct nvn_vmap *pool_vmap(const nvn_pool *o) {
     if (!(o->flags & NVN_MEMORY_POOL_FLAGS_VIRTUAL) || o->gpu < VBASE) return NULL;
     struct nvn_vmap *m = vmap_find(o->gpu);
@@ -130,7 +133,7 @@ uint8_t *nvn_gpu_host(uint64_t gpu) {
     return g ? (uint8_t *)GP(g) : NULL;
 }
 uint64_t nvn_gpu_contiguous(uint64_t gpu, uint64_t n) {
-    if (gpu < VBASE) {   /* (hookshot: up to the guest window's end, not past it) */
+    if (gpu < VBASE) {   /* (longshot: up to the guest window's end, not past it) */
         if (gpu < HOS_SYSTEM_BASE || gpu >= HOS_SPACE_END) return 0;
         return n < HOS_SPACE_END - gpu ? n : HOS_SPACE_END - gpu;
     }
@@ -168,7 +171,7 @@ int nvn_gpu_write(uint64_t gpu, const void *src, uint64_t n) {
 /* ---- device ---- */
 static volatile LONG depth_minus_w = 1;   /* (OoT's mode from the start: the shaders prepared before the game made its device were
                                             translated without the depth conversion, and the menu's text and logo fell outside the depth range
-                                            on a first start. d3zessete, Hookshot PR 54) */
+                                            on a first start. d3zessete, Longshot PR 54) */
 int nvn_depth_minus_w(void) { return depth_minus_w != 0; }
 uint64_t nvn_native_proc(const char *name);
 
@@ -184,7 +187,7 @@ NV(nvnDeviceInitialize) {
 }
 NV(nvnDeviceFinalize) { ((nvn_dev *)P(0))->magic = 0; }
 NV(nvnDeviceGetProcAddress) { RET(U64(1) ? nvn_native_proc((const char *)GP(U64(1))) : 0); }
-/* (hookshot) API version 231.40: OoT (SDK 22.2.8) skips its graphics setup unless the minor is >= 40 (main
+/* (longshot) API version 231.40: OoT (SDK 22.2.8) skips its graphics setup unless the minor is >= 40 (main
    0x8348c11c); MKW's driver said 39, which MKW accepts too. */
 /* The Switch 2 NVN2 driver's device limits: its nvnDeviceGetInteger (sdk+0x65b680) run for every id under
    Unicorn with a zeroed device. The few it reads from device state (0 there) keep NVN1's value (TOTKPort). */
@@ -219,7 +222,7 @@ NV(nvnDeviceGetInteger) {
     const unsigned w = U32(1);
     if (w >= sizeof devinfo / sizeof *devinfo) die("device property %#x", w);
     static int devinfo_log = -1;
-    if (devinfo_log < 0) devinfo_log = getenv("HOS_NVN_DEVINFO_LOG") != NULL;
+    if (devinfo_log < 0) devinfo_log = env_on("HOS_NVN_DEVINFO_LOG");
     if (devinfo_log) hos_log("nvn: nvnDeviceGetInteger(%u) -> %d", w, devinfo[w]);
     *(int *)P(2) = devinfo[w];
 }
@@ -302,15 +305,17 @@ NV(nvnMemoryPoolInitialize) {
         return;
     }
     if (!b->mem) die("memory pool without storage (flags %#x size %#llx)", o->flags, (unsigned long long)o->size);
-    gw(b->mem, o->size);   /* (hookshot: the storage lies in guest memory) */
+    gw(b->mem, o->size);   /* (longshot: the storage lies in guest memory) */
     o->mem = b->mem;
     o->gpu = b->mem;
     hos_gpu_track(o->gpu, o->size, 1);   /* (the CPU's writes to it reach the renderer through write watch) */
     rx_nvn_pool_created(o->gpu, o->size);
+    void hos_prompts_pool(uint64_t mem, uint64_t size);   /* (longshot, prompts.c: the button prompts' textures, changed in place) */
+    hos_prompts_pool(o->mem, o->size);
     OLOG("pool %#llx size %#llx flags %#x", (unsigned long long)o->gpu, (unsigned long long)o->size, o->flags);
     RET(1);
 }
-/* (hookshot) A memory-pool call made with no pool: the game passed 0 while the banc changed (thread
+/* (longshot) A memory-pool call made with no pool: the game passed 0 while the banc changed (thread
    OptimizeChangeBanc, Kakariko's day/night transition), and flags at +4 of it crashed. 0 then, and who asked, once.
    P(0) returns NULL for a 0 argument, but dereferencing that NULL is undefined behaviour: the compiler folds the
    check away and reads A64_MEM + offset instead, so the guard has to come before the dereference. */
@@ -344,6 +349,8 @@ NV(nvnMemoryPoolFinalize) {
         ReleaseSRWLockExclusive(&vmap_lock);
     } else if (o->mem) {
         hos_gpu_track(o->gpu, o->size, 0);
+        void hos_prompts_pool_gone(uint64_t mem);   /* (longshot, prompts.c: the prompts' textures no longer written there) */
+        hos_prompts_pool_gone(o->mem);
     }
     o->magic = 0;
 }
@@ -393,7 +400,7 @@ NV(nvnMemoryPoolMapVirtual) {
             die("MapVirtual request %d: virtual %#llx physical %#llx size %#llx", i, (unsigned long long)voff,
                 (unsigned long long)poff, (unsigned long long)size);
         const nvn_pool *p = pool ? (const nvn_pool *)gw(pool, sizeof(nvn_pool)) : NULL;
-        /* (hookshot: the physical pages must lie in guest memory; the pool object is guest memory) */
+        /* (longshot: the physical pages must lie in guest memory; the pool object is guest memory) */
         if (p && (!p->mem || p->gpu != p->mem || size > p->size || (uint64_t)poff > p->size - size ||
                   !hos_guest_range(p->gpu + (uint64_t)poff, size)))
             die("MapVirtual request %d: physical pool", i);
@@ -463,7 +470,7 @@ NV(nvnBufferInitialize) {
     RET(1);
 }
 NV(nvnBufferFinalize) { memset(P(0), 0, sizeof(nvn_buffer)); }
-/* (hookshot, issue 287) A buffer with no memory pool, mapped: the game filled 0x3d0 bytes at what it got back, 0, and crashed
+/* (longshot, issue 287) A buffer with no memory pool, mapped: the game filled 0x3d0 bytes at what it got back, 0, and crashed
    on a scene change (Hyrule Castle / Castle Town / Hyrule Field, Kakariko day to night; thread OptimizeChangeBanc, right after
    "flags of no memory pool"). Zeroed scratch memory in the game's address space instead, as large as the biggest asked for
    (never freed: it comes rarely), and who asked, once. */
@@ -529,7 +536,7 @@ NV(nvnSamplerPoolSetDebugLabel) {}
 NV(nvnSamplerPoolRegisterSampler) { rx_nvn_register_sampler(I(1), &((const nvn_samp *)P(2))->p); }
 
 /* ---- textures ---- */
-/* (hookshot) A texture builder of no address: a scratch one instead, said once. The game passed 0 after a long freeze (the
+/* (longshot) A texture builder of no address: a scratch one instead, said once. The game passed 0 after a long freeze (the
    ocarina note sheet's first build, combat in Hyrule Field) and nvnTextureBuilderSetSwizzle read A64_MEM + 0x5c (issue 500);
    a builder set up wrongly is a missing texture, not a crash. As PR 510 for memory pools. */
 static nvn_tex_builder *tb_or_scratch(void *p, uint64_t lr) {
@@ -563,10 +570,10 @@ NV(nvnTextureBuilderSetSize1D) { nvn_tex_builder *b = TB(P(0)); b->d.width = U32
 NV(nvnTextureBuilderSetSize2D) {
     nvn_tex_builder *b = TB(P(0));
     b->d.width = U32(1), b->d.height = U32(2), b->d.depth = 1;
-    {   /* (hookshot) HOS_SIZE_TRACE=1: who asks for the picture's sizes (the output and the scene: for wider screens) */
+    {   /* (longshot) HOS_SIZE_TRACE=1: who asks for the picture's sizes (the output and the scene: for wider screens) */
         static int on = -1;
         static volatile LONG left = 24;
-        if (on < 0) on = getenv("HOS_SIZE_TRACE") != NULL;
+        if (on < 0) on = env_on("HOS_SIZE_TRACE");
         const uint32_t w = U32(1);
         if (on && (w == 2560 || w == 2048 || w == 1536 || w == 3840 || w == 1920) && InterlockedDecrement(&left) >= 0) {
             void hos_backtrace(void);
@@ -602,7 +609,7 @@ NV(nvnTextureBuilderGetPackagedTextureData) { RET(CTB(P(0))->pkg_data); }
 static int storage_class(const nvn_texdesc *d) { return d->target == NVN_TEXTURE_TARGET_BUFFER ? 0 : 1; }
 NV(nvnTextureBuilderGetStorageClass) { RET(storage_class(&CTB(P(0))->d)); }
 NV(nvnTextureBuilderGetFlags) { RET((uint32_t)CTB(P(0))->d.flags); }
-/* (hookshot, issues 284 and 287) A size or alignment asked of no builder: the game passed 0 here while a scene loaded (thread
+/* (longshot, issues 284 and 287) A size or alignment asked of no builder: the game passed 0 here while a scene loaded (thread
    OptimizeChangeBanc, entering Castle Town), and the format read at +4 of it crashed the game. Size 0 then, and who asked, once */
 static int no_builder(Ctx *c, const char *what) {
     if (c->x[0]) return 0;
@@ -817,7 +824,7 @@ static LONG CALLBACK wts_handler(EXCEPTION_POINTERS *e) {
             static ULONGLONG after = ~0ull;   /* RX_NVN_WATCH_AFTER=<seconds>: only writes after that are reported */
             if (after == ~0ull) after = GetTickCount64() + (getenv("RX_NVN_WATCH_AFTER") ? (ULONGLONG)atoi(getenv("RX_NVN_WATCH_AFTER")) * 1000 : 0);
             static int all_threads = -1;   /* RX_NVN_WATCH_ALL=1: the Resource Memory thread's writes too */
-            if (all_threads < 0) all_threads = getenv("RX_NVN_WATCH_ALL") != NULL;
+            if (all_threads < 0) all_threads = env_on("RX_NVN_WATCH_ALL");
             if ((all_threads || strcmp(tn, "Resource Memory")) && GetTickCount64() >= after && InterlockedIncrement(&wts_reports) <= 12) {   /* (not the allocation's zero fill) */
                 hos_log("nvn: write to a WriteTexels source at guest %#llx by %s (host pc exe+%#llx)", (unsigned long long)(a - (uintptr_t)GP(0)), tn,
                         (unsigned long long)((uintptr_t)e->ExceptionRecord->ExceptionAddress - (uintptr_t)GetModuleHandleA(NULL)));
@@ -875,7 +882,7 @@ static void watch_texels_source(const nvn_tex *t, const uint8_t *data, uint64_t 
     hos_log("nvn: watching WriteTexels source guest %#llx..%#llx", (unsigned long long)(lo - (uintptr_t)GP(0)),
             (unsigned long long)(hi - (uintptr_t)GP(0)));
 }
-/* (hookshot) the bytes of the game's buffer that ReadTexels / WriteTexels touch at row and image strides (as
+/* (longshot) the bytes of the game's buffer that ReadTexels / WriteTexels touch at row and image strides (as
    texture_read_texels walks it: depth images of height rows of wb bytes); 0 when that overflows */
 static uint64_t texels_extent(uint64_t wb, uint64_t hb, uint64_t depth, uint64_t row, uint64_t img) {
     uint64_t a = 0, b = 0, n = 0;
@@ -896,7 +903,7 @@ static void texels(Ctx *c, int write, int strided) {
     uint64_t row = strided ? U64(4) : 0, img = strided ? U64(5) : 0;
     if (!row) row = wb;
     if (!img) img = row * hb;
-    /* (hookshot) the strides are the game's 64-bit values: the whole span they reach must lie in guest memory, not only
+    /* (longshot) the strides are the game's 64-bit values: the whole span they reach must lie in guest memory, not only
        the buffer's first byte (the renderer reads or writes texels at data + k * img + y * row) */
     const uint64_t extent = texels_extent(wb, hb, r->depth > 1 ? (uint64_t)r->depth : 1, row, img);
     if (!extent) die("%sTexels of %#llx rows of %#llx, %#llx apart", write ? "Write" : "Read", (unsigned long long)hb,
@@ -905,7 +912,7 @@ static void texels(Ctx *c, int write, int strided) {
     const unsigned level = v && v->set_levels ? v->base_level : 0, layer0 = v && v->set_layers ? v->min_layer : 0;
     if (v && v->set_format && v->format != t->d.format) die("%sTexels through a format view", write ? "Write" : "Read");
     static int texels_log = -1;
-    if (texels_log < 0) texels_log = getenv("RX_NVN_TEXELS_LOG") != NULL;
+    if (texels_log < 0) texels_log = env_on("RX_NVN_TEXELS_LOG");
     if (texels_log) {   /* (debugging: who, from where, and how much of the data is not zero) */
         size_t nz = 0;
         for (uint64_t i = 0; data && i < extent && i < (64u << 20); i++) nz += data[i] != 0;
@@ -1021,6 +1028,7 @@ static int set_shaders(nvn_prog *o, int n, const uint8_t *sd, int stride) {
         }
     }
     o->serial = new_serial();
+    rx_nvn_program_created(o);   /* (the stages are in memory now: the back end loads what it kept ready for them) */
     return 1;
 }
 NV(nvnProgramSetShaders) { RET(set_shaders((nvn_prog *)P(0), I(1), (const uint8_t *)P(2), 16)); }
@@ -1072,7 +1080,7 @@ static uint64_t held_count(void) { return (uint64_t)nheld; }
 NV(nvnQueueFenceSync) {
     held_init();
     nvn_sync *s = (nvn_sync *)P(1); s->fenced = 1;
-    /* (hookshot) the queue's own work: with nothing held, its last submission (a wait for it no longer waits for another
+    /* (longshot) the queue's own work: with nothing held, its last submission (a wait for it no longer waits for another
        queue's work stopped at an event wait) */
     s->fence = held_count() ? rx_nvn_fence() + held_count() : rx_nvn_fence_q((uint64_t)(uintptr_t)P(0));
     if (sync_log()) hos_log("nvn: FenceSync %p -> %llu (lr %#llx)", (void *)s, (unsigned long long)s->fence, (unsigned long long)c->x[30]);
@@ -1103,7 +1111,7 @@ NV(nvnSyncWait) {
     if (s->fenced == 1 && s->fence > rx_nvn_fence()) held_flush();   /* (a wait flushes what it waits for) */
     if (rx_nvn_wait(s->fence, 0)) { RET(NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED); return; }
     static int block = -1;   /* HOS_NVN_SYNC_BLOCK=1 (experiment): a poll waits for the GPU */
-    if (block < 0) block = getenv("HOS_NVN_SYNC_BLOCK") != NULL;
+    if (block < 0) block = env_on("HOS_NVN_SYNC_BLOCK");
     const int away = hos_vcore_away();
     const int64_t t0 = hos_now_ns();
     const int ok = rx_nvn_wait(s->fence, block ? ~0ull >> 1 : U64(1));
@@ -1122,7 +1130,7 @@ NV(nvnEventInitialize) {
     RET(1);
 }
 NV(nvnEventFinalize) { ((nvn_event *)P(0))->magic = 0; }
-/* (hookshot) an NVN event's value from the host (hos_thread.c's present poll): 0 when it is no event */
+/* (longshot) an NVN event's value from the host (hos_thread.c's present poll): 0 when it is no event */
 int hos_nvn_event_value(uint64_t guest_event, uint32_t *v) {
     const nvn_event *e = (const nvn_event *)hos_guest_range(guest_event, sizeof(nvn_event));
     if (!guest_event || !e || e->magic != NVN_MAGIC('E', 'V', 'N', 'T')) return 0;
@@ -1131,7 +1139,7 @@ int hos_nvn_event_value(uint64_t guest_event, uint32_t *v) {
     return 1;
 }
 NV(nvnEventGetValue) {
-    {   /* (hookshot, experiment) HOS_PRESENT_NOWAIT=1: OoT's present poll (hos_thread.c present_poll) sees its frame's
+    {   /* (longshot, experiment) HOS_PRESENT_NOWAIT=1: OoT's present poll (hos_thread.c present_poll) sees its frame's
            event signalled at once: the replay reads memory as submitted, so the game may go on to the next frame
            while this one is replayed, as far as the window's textures and the replay's queue let it */
         static int nowait = -1;
@@ -1205,7 +1213,7 @@ static void *pool_head[POOL_MAX + 1];
 static uint64_t pool_bytes[POOL_MAX + 1];
 static int pool_off(void) {
     static int off = -1;
-    if (off < 0) off = getenv("NVN_NO_POOL") != NULL;
+    if (off < 0) off = env_on("NVN_NO_POOL");
     return off;
 }
 static unsigned pool_class(size_t n) {
@@ -1244,7 +1252,7 @@ static void pool_put(void *b, unsigned cls) {
     if (!keep) free(b);
 }
 
-/* (hookshot) A command buffer's recording buffer lives in host memory, and its pointers in this table, not in the
+/* (longshot) A command buffer's recording buffer lives in host memory, and its pointers in this table, not in the
    object (guest memory). The object holds its slot's number; a slot names the object it belongs to, so a slot number
    that is not the object's own is not used: the object gets a new slot, as an object never initialized does. Slots are
    in chunks that are never freed, so a lookup needs no lock (a command buffer records on one thread at a time). */
@@ -1396,7 +1404,7 @@ typedef struct { uint64_t magic, bytes, cls; } copy_prefix;   /* (cls: its pool 
 typedef struct { copy_prefix *p; uint64_t after; } dead_copy;
 static dead_copy *dead;
 static size_t ndead, cap_dead;
-/* (hookshot) The live handles, a host set (open addressing, copy_lock held): a handle the game passes back is a host
+/* (longshot) The live handles, a host set (open addressing, copy_lock held): a handle the game passes back is a host
    address, so it is used only when it is in the set, never on what the memory at that address holds. */
 static uint64_t *live_handles;
 static size_t live_cap, nlive;
@@ -1493,7 +1501,7 @@ static void release_copies(uint64_t lo, uint64_t hi) {
 #define COPY_MARK 0x4b52414d59504f43ull   /* "COPYMARK" */
 static void sweep_overwritten_copies(void) {   /* (copy_lock held) */
     static int off = -1;
-    if (off < 0) off = getenv("HOS_NVN_NO_SWEEP") != NULL;
+    if (off < 0) off = env_on("HOS_NVN_NO_SWEEP");
     if (off || !rec_buckets) return;
     free_dead_copies();
     const uint64_t after = rx_nvn_pushed() + held_count();
@@ -1533,7 +1541,7 @@ static void sweep_overwritten_copies(void) {   /* (copy_lock held) */
         }
     }
     static int logged;
-    if (swept && logged++ < 12) hos_log("nvn: %zu copies of recordings whose control memory was reused let go (%zu live)", swept, ncopies);
+    if (swept && logged++ < 12) hos_log_at(HOS_LOG_DEBUG, "nvn: %zu copies of recordings whose control memory was reused let go (%zu live)", swept, ncopies);
 }
 NV(nvnCommandBufferAddControlMemory) {
     nvn_cmd *o = CB(P(0));
@@ -1724,7 +1732,7 @@ NV(nvnCommandBufferWaitSync) {
     const LONG k = InterlockedIncrement(&n);
     if (k <= 40 || k % 5000 == 0) hos_log("nvn: CommandBufferWaitSync #%ld (lr %#llx)", (long)k, (unsigned long long)c->x[30]);
 }
-/* (hookshot) nvnCommandBufferPushComputeConstants(cmdbuf, int ?, offset, size, const void* data): compute push
+/* (longshot) nvnCommandBufferPushComputeConstants(cmdbuf, int ?, offset, size, const void* data): compute push
    constants, which NVN2 compute programs read from their driver bank (c0) after the workgroup counts. OoT pushes a
    colour matrix (0x40 bytes) for the shader that turns its movie's NV12 planes into RGBA. Copied at record time, as
    UpdateUniformBuffer; the replay keeps them in the compute state (vk_bank.cpp serves them). */
@@ -1739,7 +1747,7 @@ NV(nvnCommandBufferPushComputeConstants) {
     memcpy(p + 8, &u, sizeof u);
     memcpy(p + 8 + sizeof u, PN(4, n), n);
 }
-/* (hookshot) nvnQueueWaitSync(queue, sync): the queue's later work waits on the GPU for the sync's fence. Every
+/* (longshot) nvnQueueWaitSync(queue, sync): the queue's later work waits on the GPU for the sync's fence. Every
    NVN queue replays in one stream in submit order, so a fence submitted before this already came first; a sync not
    fenced yet (a wait on a fence another queue submits later) cannot be honored that way and is logged. */
 NV(nvnQueueWaitSync) {
@@ -1775,7 +1783,7 @@ NV(nvnCommandBufferReportCounter) {
         r->type |= NVN_COUNTER_WRITTEN;
     }
 }
-/* (hookshot) nvnCommandBufferClearBuffer(cmdbuf, BufferAddress dst, size_t size, uint32_t value): OoT's gameplay
+/* (longshot) nvnCommandBufferClearBuffer(cmdbuf, BufferAddress dst, size_t size, uint32_t value): OoT's gameplay
    clears small GPU buffers (counters, 8 bytes) with it */
 NV(nvnCommandBufferClearBuffer) {
     nvn_p_clear_buf *r = REC(CB(P(0)), NOP_CLEAR_BUF, nvn_p_clear_buf);
@@ -1788,7 +1796,7 @@ NV(nvnCommandBufferCopyBufferToBuffer) {
 /* the data is copied at record time (the caller may change it afterwards); written in GPU order at replay */
 NV(nvnCommandBufferUpdateUniformBuffer) {
     const uint64_t n = U64(4);
-    /* (hookshot) NVN's limit is 64 KiB an update; a larger size is not recorded (its record size is 32-bit) */
+    /* (longshot) NVN's limit is 64 KiB an update; a larger size is not recorded (its record size is 32-bit) */
     if (n > 0x10000) die("UpdateUniformBuffer of %#llx bytes", (unsigned long long)n);
     nvn_cmd *o = CB(P(0));
     const uint32_t sz = (uint32_t)(8 + sizeof(nvn_p_update_ub) + n);
@@ -2153,9 +2161,9 @@ NV(nvnCommandBufferCopyBufferToTexture) {
     set_view(&r->view, &r->has_view, U64(3));
     r->r = *(const NVNcopyRegion *)P(4);
     r->flags = I(5);
-    {   /* (hookshot, RX_VK_LOG_B2T=1) who records the big copies: the caller's chain, each new source once */
+    {   /* (longshot, RX_VK_LOG_B2T=1) who records the big copies: the caller's chain, each new source once */
         static int on = -1;
-        if (on < 0) on = getenv("RX_VK_LOG_B2T") != NULL;
+        if (on < 0) on = env_on("RX_VK_LOG_B2T");
         static uint64_t seen[16];
         static volatile LONG nseen;
         int k;
@@ -2198,7 +2206,7 @@ static void clear_tex(Ctx *c, int is_uint) {
 NV(nvnCommandBufferClearTexture) { clear_tex(c, 0); }
 NV(nvnCommandBufferClearTextureui) { clear_tex(c, 1); }
 NV(nvnCommandBufferSetCopyRowStride) { REC(CB(P(0)), NOP_COPY_STRIDE, nvn_p_copy_stride)->stride = (int64_t)U64(1); }
-/* (hookshot) the buffer stride between layers of a 3D / array copy; OoT sets 0 (tightly packed, the default the
+/* (longshot) the buffer stride between layers of a 3D / array copy; OoT sets 0 (tightly packed, the default the
    replay assumes). A real stride is logged: the replay would need it. */
 NV(nvnCommandBufferSetCopyImageStride) {
     static int once;
@@ -2269,7 +2277,7 @@ NV(nvnColorStateSetAlphaTest) { ST(nvn_color_st, P(0))->alpha_func = U32(1); }
 NV(nvnChannelMaskStateSetDefaults) { ST(nvn_chmask_st, P(0))->mask = 0xffffffffu; }
 NV(nvnChannelMaskStateSetChannelMask) {
     static int chmask_log = -1;   /* (asked once: getenv on every call was 15% of the render thread) */
-    if (chmask_log < 0) chmask_log = getenv("HOS_NVN_CHMASK_LOG") != NULL;
+    if (chmask_log < 0) chmask_log = env_on("HOS_NVN_CHMASK_LOG");
     if (chmask_log) {   /* (debugging: NVN2's arguments) */
         static volatile LONG n;
         if (InterlockedIncrement(&n) <= 40)
@@ -2392,13 +2400,14 @@ NV(nvnQueueSubmitCommands) {
 
 /* ---- window ---- */
 #define WB(p) ((nvn_win_builder *)(p))
-/* (hookshot) a window texture: a guest address, checked at each use (the window object is guest memory) */
+/* (longshot) a window texture: a guest address, checked at each use (the window object is guest memory) */
 static const nvn_tex *win_tex(const nvn_win *o, int i) {
     if (i < 0 || i >= 4 || !o->tex[i]) die("window texture %d", i);
     return (const nvn_tex *)gw(o->tex[i], sizeof(nvn_tex));
 }
 void hos_vi_native_acquire(int active);
-void hos_vi_native_presented(void);
+int hos_vi_present_trace_enabled(void);
+void hos_vi_native_presented(const int64_t phases[4]);
 NV(nvnWindowBuilderSetDefaults) {
     nvn_win_builder *b = WB(P(0));
     void *dev = b->dev;
@@ -2486,16 +2495,23 @@ NV(nvnQueuePresentTexture) {
     nvn_win *o = (nvn_win *)P(1);
     const int i = I(2);
     if (i < 0 || i >= o->ntex) die("present of window texture %d", i);
+    HOS_CHAIN(HOS_CHAIN_PRESENT, (uint64_t)i);
+    const int trace = hos_vi_present_trace_enabled();
+    int64_t phases[4] = {0};
+    if (trace) phases[0] = hos_now_ns();
     held_flush();   /* (a present flushes the queue) */
     {
         const int away = hos_vcore_away();
+        if (trace) phases[1] = hos_now_ns();
         rx_nvn_present(win_tex(o, i), o->crop);
+        if (trace) phases[2] = hos_now_ns();
         if (away) hos_vcore_back();
+        if (trace) phases[3] = hos_now_ns();
     }
     o->presents++;
     extern volatile LONG64 hos_present_count;   /* display.c */
     InterlockedIncrement64(&hos_present_count);
-    hos_vi_native_presented();
+    hos_vi_native_presented(phases);
 }
 
 /* ---- NVN2 (mkw-recomp): what the Switch 2's NVN adds, as MKW uses it ---- */
@@ -3119,7 +3135,7 @@ static const nvn_impl impls[] = {
    so the game goes on and the log lists what is left. HOS_NVN_STRICT=1: it stops the game, as in TOTKPort. */
 static void unimplemented(Ctx *c, void *name) {
     static int strict = -1;
-    if (strict < 0) strict = getenv("HOS_NVN_STRICT") != NULL;
+    if (strict < 0) strict = env_on("HOS_NVN_STRICT");
     if (strict)
         die("NVN %s is not implemented (x0 %#llx x1 %#llx x2 %#llx)", (const char *)name, (unsigned long long)c->x[0],
             (unsigned long long)c->x[1], (unsigned long long)c->x[2]);

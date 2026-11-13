@@ -6,6 +6,9 @@ import shutil
 import subprocess
 import tempfile
 
+# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
+ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
+
 RUN_ALL_ARGS = ["--cc", "gcc"]
 
 
@@ -36,13 +39,13 @@ def main():
     dpi = source.index("if (window_dpi(hwnd)", create)
     functions.append("static void create_window(void) {\n" + source[create:dpi] + "}\n")
     fixture = template.replace("/* ACTUAL_DISPLAY_STARTUP */", "\n".join(functions))
-    with tempfile.TemporaryDirectory(prefix="hookshot-display-startup-") as temp:
+    with tempfile.TemporaryDirectory(prefix="longshot-display-startup-") as temp:
         c_file, executable = Path(temp) / "fixture.c", Path(temp) / "fixture.exe"
         c_file.write_text(fixture, encoding="utf-8")
         if Path(args.cc).name.lower() in ("cl", "cl.exe"):
             flags = ["/nologo", "/TC", "/W4", "/WX", f"/Fe:{executable}"]
         else:
-            flags = ["-std=c11", "-O0", "-Wall", "-Wextra", "-Werror", "-Wno-unknown-warning-option", "-Wno-unused-but-set-global",
+            flags = ["-std=c11", "-include", ENV_ON_H, "-O0", "-Wall", "-Wextra", "-Werror", "-Wno-unknown-warning-option", "-Wno-unused-but-set-global",
                      "-o", str(executable)]   # (newer clang: a fixture global set and never read)
         subprocess.run([args.cc, *flags, str(c_file)], cwd=temp, check=True)
         subprocess.run([str(executable)], check=True)

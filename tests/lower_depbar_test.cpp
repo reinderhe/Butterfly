@@ -1,4 +1,4 @@
-// (hookshot) Every DEPBAR form lowers, to nothing. Until the AMD fixes the Ampere -> Maxwell lowering accepted
+// (longshot) Every DEPBAR form lowers, to nothing. Until the AMD fixes the Ampere -> Maxwell lowering accepted
 // DEPBAR.LE SB5, n alone and rejected the waits OoT's programs use, DEPBAR.LE SB0, 0x0, {1,2,3,4} ("native dependency
 // barrier mode"), so three compute programs and a vertex program never ran. The encodings here are built from the
 // fields (.LE bit 47, the scoreboard 44..46, the count 38..43, the set of scoreboards 32..37), not taken from a program.

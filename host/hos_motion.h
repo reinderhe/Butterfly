@@ -1,4 +1,4 @@
-/* (hookshot) A controller's motion sensors as the Switch reports its six-axis state (host/pad_sdl.c fills it from
+/* (longshot) A controller's motion sensors as the Switch reports its six-axis state (host/pad_sdl.c fills it from
    SDL, host/nn_hid.c hands it to the game's GetSixAxisSensorStates). Header-only, no SDL or Windows, so
    tests/test_motion.py runs it as it is.
 

@@ -5,9 +5,9 @@ nx2/shader_census.py's readers on the same bytes; the translation/key part needs
 built by nx2/bake_ds/build.sh (pass --tool, or set BAKE_DS_TOOL; without it that half is skipped, not failed).
 A one-program HMMA fixture pins the --target tensor gate, the emitted form (shuffle expansion vs software
 function, no OpCooperativeMatrixMulAddKHR in either) and the stamp it folds (the real 71-program expansion
-and the compute answer variants need the ROM set: bake_all --target query, see BAKE.md).
+and the compute answer variants need the ROM set: bake_all --target query, see docs/BAKE.md).
 
-    python -I -B tests/test_bake_ds.py [--tool ${TMPDIR:-/tmp}/hookshot-ds/bake_ds]
+    python -I -B tests/test_bake_ds.py [--tool ${TMPDIR:-/tmp}/longshot-ds/bake_ds]
 """
 import argparse
 import collections
@@ -174,7 +174,7 @@ def run_tests(tool):
 
     # 2. enumerate -> HKSEED01, with the bone generic variants present
     r = romenum.enumerate_tree(rom, verbose=False)
-    seed_path = os.path.join(tmp, "hookshot_shaders.bin")
+    seed_path = os.path.join(tmp, "longshot_shaders.bin")
     romenum.write_seed(seed_path, r)
     stages, programs = parse_seed(seed_path)
     assert all(s["key"] == s["stored"] for s in stages), "seed keys are the runtime's FNV-1a identity"
@@ -234,7 +234,7 @@ def run_tests(tool):
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             assert p.returncode == 0, (name, p.stderr.decode()[:400])
     # (the bank reads back through a copy of program_cache_load's reader)
-    p = subprocess.run([tool, "verify", "--bank", os.path.join(out, "hookshot_programs.bin")],
+    p = subprocess.run([tool, "verify", "--bank", os.path.join(out, "longshot_programs.bin")],
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     assert p.returncode == 0, p.stdout.decode()
     assert b"18 records" in p.stdout and b"0 bad" in p.stdout, p.stdout
@@ -300,7 +300,7 @@ def run_tests(tool):
                 p = subprocess.run([val, "--target-env", "vulkan1.3", "--uniform-buffer-standard-layout",
                                     path], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 assert p.returncode == 0, (name, n, p.stderr.decode()[:400])
-        bank = os.path.join(out, "hookshot_programs.bin")
+        bank = os.path.join(out, "longshot_programs.bin")
         p = subprocess.run([tool, "verify", "--bank", bank], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert p.returncode == 0 and b"1 records" in p.stdout, p.stdout
         # (the loader's check: this bank matches its own target's stamp, and no other profile's)

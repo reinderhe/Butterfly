@@ -1,4 +1,4 @@
-// (hookshot) Which gamepad buttons confirm and go back in the Insert menu: the ones the Switch's A and B are bound to (the
+// (longshot) Which gamepad buttons confirm and go back in the Insert menu: the ones the Switch's A and B are bound to (the
 // Controls page, the Layout preset), so the menu answers to A and B as the game does. With the Nintendo layout, the default,
 // A is the right face button and B the bottom one, as on a Switch; with Xbox / PC, A is the bottom one. A binding the menu
 // cannot use (none, or not a face button: the menu keeps the D-pad, Home and the shoulders) falls back to the bottom button
