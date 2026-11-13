@@ -230,7 +230,6 @@ static void fused(const HosMotionState *m, float q[4]) {
 static SRWLOCK integ_lock = SRWLOCK_INIT;
 static float integ_q[4] = {0, 0, 0, 1};
 static float integ_ring[HOS_MOTION_HISTORY][4];
-static int64_t integ_n = -1;   /* the newest reading integrated (its own count) */
 static int use_integration(void) {
     static int v = -1;
     if (v < 0) {
@@ -257,8 +256,43 @@ static void q_from_accel(const float *a, float q[4]) {
     q[0] = u[1] * v[2] - u[2] * v[1], q[1] = u[2] * v[0] - u[0] * v[2], q[2] = u[0] * v[1] - u[1] * v[0], q[3] = 1 + d;
     q_norm(q);
 }
-static void integrate_one(const HosMotionSample *s) {
-    const HosMotionState *m = &s->st;
+/* The fusion's Joy-Con axes against the six-axis state's (which Ocarina of Time and the game's own pre-calibration aim read
+   right): each axis kept or turned around. The default turns x and z around (a half turn about the long axis, y): with the
+   six-axis state's axes the calibrated aim had pitch and yaw backwards and roll right, and the calibration's gravity check
+   failed. F7 in the game tries the next of the eight (logged), BUTTERFLY_MOTION_AXES=0..7 starts at one. An axis turned
+   around turns the acceleration's part on it; the angular velocity, an axial vector, turns with det(T) T. */
+static const signed char axes_sign[8][3] = {{-1, 1, -1}, {1, 1, 1}, {1, -1, 1}, {-1, -1, 1},
+                                             {1, -1, -1}, {-1, 1, 1}, {1, 1, -1}, {-1, -1, -1}};
+static volatile int axes_pick = -1;
+static int64_t integ_n = -1;   /* the newest reading integrated (its own count) */
+static int motion_axes(void) {
+    static SHORT was;
+    if (axes_pick < 0) {
+        const char *e = getenv("BUTTERFLY_MOTION_AXES");
+        axes_pick = e && *e >= '0' && *e <= '7' ? *e - '0' : 0;
+        hos_log("hid: sensor fusion axes: variant %d (x %+d, y %+d, z %+d; F7 tries the next)", axes_pick,
+                axes_sign[axes_pick][0], axes_sign[axes_pick][1], axes_sign[axes_pick][2]);
+    }
+    const SHORT now = GetAsyncKeyState(VK_F7) & 0x8000 ? 1 : 0;
+    if (now && !was) {
+        axes_pick = (axes_pick + 1) & 7;
+        integ_n = -1;   /* (the orientation starts again from gravity) */
+        hos_log("hid: sensor fusion axes: variant %d (x %+d, y %+d, z %+d; F7 tries the next)", axes_pick,
+                axes_sign[axes_pick][0], axes_sign[axes_pick][1], axes_sign[axes_pick][2]);
+    }
+    was = now;
+    return axes_pick;
+}
+/* a reading's acceleration (G) and angular velocity (turns a second) in the fusion's axes */
+static void fusion_axes(const HosMotionState *m, int v, float a[3], float g[3]) {
+    const signed char *t = axes_sign[v];
+    const int det = t[0] * t[1] * t[2];
+    for (int k = 0; k < 3; k++) a[k] = t[k] * m->accel[k], g[k] = (float)(det * t[k]) * m->gyro[k];
+}
+static void integrate_one(const HosMotionSample *s, int v) {
+    HosMotionState mm;
+    fusion_axes(&s->st, v, mm.accel, mm.gyro);
+    const HosMotionState *m = &mm;
     float dt = s->dt_ns > 0 ? (float)s->dt_ns * 1e-9f : 0.005f;
     if (dt > 0.1f) dt = 0.1f;
     float w[3];
@@ -282,17 +316,19 @@ static void integrate_one(const HosMotionSample *s) {
     q_norm(integ_q);
 }
 /* each reading of h (newest first) its integrated orientation, into qs */
-static void integrated(const HosMotionSample *h, int live, float qs[][4]) {
+static void integrated(const HosMotionSample *h, int live, int v, float qs[][4]) {
     AcquireSRWLockExclusive(&integ_lock);
     if (integ_n < 0 || h[0].n < integ_n) {
-        q_from_accel(h[live - 1].st.accel, integ_q);   /* (first, or a new motion pad: the tilt from gravity; a gap is
+        float a0[3], g0[3];
+        fusion_axes(&h[live - 1].st, v, a0, g0);
+        q_from_accel(a0, integ_q);   /* (first, or a new motion pad: the tilt from gravity; a gap is
                                                           integrated over from what is left of it) */
         integ_n = h[live - 1].n;
         memcpy(integ_ring[integ_n % HOS_MOTION_HISTORY], integ_q, 16);
     }
     for (int i = live - 1; i >= 0; i--) {
         if (h[i].n <= integ_n) continue;
-        integrate_one(&h[i]);
+        integrate_one(&h[i], v);
         integ_n = h[i].n;
         memcpy(integ_ring[integ_n % HOS_MOTION_HISTORY], integ_q, 16);
     }
@@ -350,7 +386,8 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
     static SRWLOCK out_lock = SRWLOCK_INIT;
     const int integ = use_integration() && live;
     AcquireSRWLockExclusive(&out_lock);
-    if (integ) integrated(h, live, qs);
+    const int axv = motion_axes();
+    if (integ) integrated(h, live, axv, qs);
     for (int i = 0; i < n; i++) {
         const uint64_t e = out + (uint64_t)i * ENTRY;
         const HosMotionState *m = live ? &h[i].st : &at_rest;
@@ -362,12 +399,15 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
         } else {
             fused(m, q);
         }
-        for (int k = 0; k < 3; k++) dps[k] = m->gyro[k] * 360.0f;
+        float acc[3], rev[3];
+        if (integ) fusion_axes(m, axv, acc, rev);
+        else memcpy(acc, m->accel, 12), memcpy(rev, m->gyro, 12);
+        for (int k = 0; k < 3; k++) dps[k] = rev[k] * 360.0f;
         memset(GP(e), 0, ENTRY);
         G64(e) = (uint64_t)(live ? fusion_base + h[i].n : fusion_last - i);
         G64(e + 8) = 1;
         G64(e + 0x10) = (uint64_t)(live && h[i].dt_ns > 0 ? h[i].dt_ns : 5000000);
-        memcpy(GP(e + 0x18), m->accel, 12);
+        memcpy(GP(e + 0x18), acc, 12);
         memcpy(GP(e + 0x24), dps, 12);
         memcpy(GP(e + 0x30), q, 16);
         *(uint8_t *)GP(e + 0x40) = (uint8_t)status;
