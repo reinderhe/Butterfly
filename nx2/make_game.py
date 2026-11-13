@@ -2402,6 +2402,13 @@ def main(a=None):
 
     say("stage", "finish", "Putting the game folder together")
     built = os.path.join(work, "sa", "build")
+    # (butterfly) the exe's map kept in the build files folder (work/longshot.map, a few MB of names and addresses, no code): what
+    # nx2/hot_from_samples.py names a profiling run's samples by (hot_funcs.txt, hot_order.txt for the next build)
+    if not _game.is_oot(work) and os.path.isfile(os.path.join(built, "longshot.map")):
+        try:
+            shutil.copyfile(os.path.join(built, "longshot.map"), os.path.join(work, "longshot.map"))
+        except OSError:
+            pass
     # (the new files are copied in beside the old ones as <name>.new and swapped in only once all are complete: a build stopped while
     # copying, or a full disk, left a half-written 460 MB longshot.exe and no game to play. The old game stays playable until the swap)
     # (Windows) longshot.exe in the folder is the game's launcher: the builder's small setup (builder/setup/setup.c), which starts

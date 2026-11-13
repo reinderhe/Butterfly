@@ -245,6 +245,7 @@ void hos_commit_init(void) {
    waits for */
 #ifdef _WIN32
 #include <tlhelp32.h>
+#include <psapi.h>
 int hos_thread_handles(HANDLE *out, const char **names, int max);   /* hos_thread.c */
 static DWORD WINAPI prof_thread(void *p) {
     const DWORD ms = (DWORD)(uintptr_t)p * 1000;
@@ -653,6 +654,77 @@ static DWORD WINAPI sample_all_thread(void *p) {
     return 0;
 }
 
+/* (butterfly) HOS_HOT_SAMPLE=<file>: the game's own threads sampled every 2 ms for the hot-function list (nx2/hot_from_samples.py
+   makes hot_funcs.txt and hot_order.txt of it, which the next build compiles its hottest code with). Each sample is the start of
+   the three innermost functions of this exe on that thread's stack (as RVAs; the build's longshot.map names them), counted in
+   memory: a few hundred KB however long the game runs, the file rewritten every 10 s. HOS_SAMPLE_ALL's file grew by megabytes a
+   second. A thread waiting in the system has no frame of the exe innermost and is not counted. */
+typedef struct { uint32_t f[3]; uint32_t n; } HotKey;
+enum { HOT_SLOTS = 1 << 18 };
+static HotKey *hot_tab;
+static int64_t hot_samples, hot_kept;
+static void hot_count(const uint32_t f[3]) {
+    uint32_t h = (f[0] * 2654435761u) ^ (f[1] * 40503u) ^ (f[2] * 2246822519u);
+    for (int probe = 0; probe < 64; probe++) {
+        HotKey *k = &hot_tab[(h + probe) & (HOT_SLOTS - 1)];
+        if (!k->n) { k->f[0] = f[0], k->f[1] = f[1], k->f[2] = f[2], k->n = 1; hot_kept++; return; }
+        if (k->f[0] == f[0] && k->f[1] == f[1] && k->f[2] == f[2]) { k->n++; return; }
+    }
+}
+static void hot_write(const char *path) {
+    char tmp[MAX_PATH];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "# butterfly hot samples: %lld samples; rva0 rva1 rva2 count (innermost first, 0: none)\n", (long long)hot_samples);
+    for (int i = 0; i < HOT_SLOTS; i++)
+        if (hot_tab[i].n) fprintf(f, "%x %x %x %u\n", hot_tab[i].f[0], hot_tab[i].f[1], hot_tab[i].f[2], hot_tab[i].n);
+    fclose(f);
+    MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING);
+}
+static DWORD WINAPI hot_sample_thread(void *p) {
+    const char *path = (const char *)p;
+    hot_tab = (HotKey *)calloc(HOT_SLOTS, sizeof(HotKey));
+    if (!hot_tab) return 0;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    const uint64_t base = (uint64_t)GetModuleHandleA(NULL);
+    MODULEINFO mi;
+    memset(&mi, 0, sizeof mi);
+    K32GetModuleInformation(GetCurrentProcess(), (HMODULE)base, &mi, sizeof mi);
+    const uint64_t end = base + (mi.SizeOfImage ? mi.SizeOfImage : 0x40000000ull);
+    hos_log("prof: hot-function sampling into %s (the game's threads, every 2 ms)", path);
+    static HANDLE gh[1024];
+    static const char *gn[1024];
+    int64_t last_write = hos_now_ns();
+    for (;;) {
+        Sleep(2);
+        const int ng = hos_thread_handles(gh, gn, 1024);
+        for (int i = 0; i < ng; i++) {
+            if (GetThreadId(gh[i]) == GetCurrentThreadId() || SuspendThread(gh[i]) == (DWORD)-1) continue;
+            CONTEXT ctx;
+            memset(&ctx, 0, sizeof ctx);
+            ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+            uint32_t fr[3] = {0, 0, 0};
+            int nf = 0;
+            if (GetThreadContext(gh[i], &ctx) && ctx.Rip >= base && ctx.Rip < end) {
+                for (int depth = 0; depth < 24 && nf < 3 && ctx.Rip; depth++) {
+                    DWORD64 image = 0;
+                    PRUNTIME_FUNCTION rf = RtlLookupFunctionEntry(ctx.Rip, &image, NULL);
+                    if (ctx.Rip >= base && ctx.Rip < end) fr[nf++] = rf ? (uint32_t)rf->BeginAddress : (uint32_t)(ctx.Rip - base);
+                    if (!rf) break;
+                    void *hd;
+                    DWORD64 frame;
+                    RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, rf, &ctx, &hd, &frame, NULL);
+                }
+            }
+            ResumeThread(gh[i]);
+            if (nf) hot_samples++, hot_count(fr);
+        }
+        if (hos_now_ns() - last_write > 10000000000ll) last_write = hos_now_ns(), hot_write(path);
+    }
+    return 0;
+}
+
 void hos_prof_start(void) {
     const char *tt = getenv("HOS_THREAD_TIMES");
     if (tt && atoi(tt) > 0) CreateThread(NULL, 0, thread_times_thread, (void *)(uintptr_t)atoi(tt), 0, NULL);
@@ -662,6 +734,8 @@ void hos_prof_start(void) {
     if (e && atoi(e) > 0 && s && *s) CreateThread(NULL, 0, sample_thread, (void *)s, 0, NULL);
     const char *all = getenv("HOS_SAMPLE_ALL");
     if (all && *all) CreateThread(NULL, 0, sample_all_thread, (void *)all, 0, NULL);
+    const char *hot = getenv("HOS_HOT_SAMPLE");
+    if (hot && *hot) CreateThread(NULL, 0, hot_sample_thread, (void *)hot, 0, NULL);
     const char *watch = getenv("HOS_WATCH");
     if (watch && *watch) CreateThread(NULL, 0, watch_thread, (void *)watch, 0, NULL);
 }

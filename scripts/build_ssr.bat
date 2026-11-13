@@ -116,9 +116,25 @@ if exist "%GAME%\longshot.exe" (
     echo rem set "BUTTERFLY_MOTION_AXES=7"
     echo start "" butterfly.exe
 ) > "%GAME%\diagnostics.bat"
+rem (profile.bat: a play session sampled for the hot-function list; when the game closes the lists go into the build files folder,
+rem and the next build compiles the hottest code with them. Only function names and counts: no game code)
+(
+    echo @echo off
+    echo cd /d "%%~dp0"
+    echo set "HOS_HOT_SAMPLE=%%~dp0hot_samples.txt"
+    echo set "HOS_PROFILE=5"
+    echo set "HOS_VIDEO_LOG=1"
+    echo echo Butterfly with profiling. Play as you normally would for 10 to 15 minutes: the intro, the island menu, a few sports.
+    echo echo Then close the game; this window makes the lists for the next build.
+    echo start "" /wait butterfly.exe
+    echo "%TOOLS%\python\python.exe" -I "%TOOLS%\nx2\hot_from_samples.py" "%%~dp0hot_samples.txt" "%WORK%\longshot.map" "%WORK%"
+    echo echo.
+    echo echo Done. Build Butterfly again ^(Butterfly Builder or build_ssr_longshot.bat^) to use them.
+    echo pause
+) > "%GAME%\profile.bat"
 
 echo.
-echo Done. The game is in %GAME%. Start it with diagnostics.bat there, or butterfly.exe.
+echo Done. The game is in %GAME%. Start it with butterfly.exe (diagnostics.bat: F9 frame dumps; profile.bat: a profiling run).
 echo The first start compiles its shaders again (Longshot keeps its own caches).
 %BF_PAUSE%
 exit /b 0
