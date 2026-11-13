@@ -2,7 +2,7 @@
    paired with Windows by the game itself, no Bluetooth settings needed; and each is turned off when the game closes, so
    a button press wakes it and it reconnects next time.
 
-   Pairing (Windows only): every 5 s while no full set is open (a Pro Controller, or a left and a right Joy-Con), a
+   Pairing (Windows only): every 5 s while no Switch controller is open at all (an inquiry disturbs connected ones), a
    Bluetooth inquiry looks for a Joy-Con or Pro Controller that answers it and is not connected, and pairs it: bonded
    (Windows only makes a one-way link to a controller that reconnects by itself without the stored key), the PIN 0000
    for one that asks, the HID service on. A controller Windows remembers but can't reconnect is paired from the start
@@ -196,8 +196,12 @@ static DWORD WINAPI pair_main(LPVOID unused) {
     for (;;) {
         int left = 0, right = 0, pro = 0;
         hos_sdl_switch_pads(&left, &right, &pro);
-        /* (an inquiry can add input lag: only while the set is not whole, and every 5 s, as in Lichii and Dolphin) */
-        if (!pro && !(left && right)) pair_discoverable();
+        /* (only while no Switch controller is open at all. An inquiry holds the PC's radio for 2.5 s: with one Joy-Con of a
+           pair connected (Lichii's rule: until the set is whole) it lagged and dropped, the other one then too, and every
+           drop meant more inquiries, every 5 s: a game where neither Joy-Con kept its connection. A bonded Joy-Con that
+           drops comes back by itself; a second one in pairing mode waits until none is connected, or for Windows' own
+           Bluetooth settings) */
+        if (!pro && !left && !right) pair_discoverable();
         Sleep(5000);
     }
     return 0;
