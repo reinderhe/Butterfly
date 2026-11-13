@@ -258,9 +258,9 @@ static void q_from_accel(const float *a, float flat, float q[4]) {
     q_norm(q);
 }
 /* The fusion's Joy-Con axes against the six-axis state's (which Ocarina of Time and the game's own pre-calibration aim read
-   right): each axis kept or turned around. The default turns x and z around (a half turn about the long axis, y): with the
-   six-axis state's axes the calibrated aim had pitch and yaw backwards and roll right, and the calibration's gravity check
-   failed. F7 in the game tries the next of the eight (logged), BUTTERFLY_MOTION_AXES=0..7 starts at one. An axis turned
+   right): each axis kept or turned around. The default (6) turns z around: with the six-axis state's axes the calibrated aim had
+   pitch and yaw backwards and the calibration's gravity check failed; with x and z turned around (0) all was right but the
+   roll (the plane's bank), mirrored. F7 in the game tries the next of the eight (logged), BUTTERFLY_MOTION_AXES=0..7 starts at one. An axis turned
    around turns the acceleration's part on it; the angular velocity, an axial vector, turns with det(T) T. */
 static const signed char axes_sign[8][3] = {{-1, 1, -1}, {1, 1, 1}, {1, -1, 1}, {-1, -1, 1},
                                              {1, -1, -1}, {-1, 1, 1}, {1, 1, -1}, {-1, -1, -1}};
@@ -270,7 +270,7 @@ static int motion_axes(void) {
     static SHORT was;
     if (axes_pick < 0) {
         const char *e = getenv("BUTTERFLY_MOTION_AXES");
-        axes_pick = e && *e >= '0' && *e <= '7' ? *e - '0' : 0;
+        axes_pick = e && *e >= '0' && *e <= '7' ? *e - '0' : 6;
         hos_log("hid: sensor fusion axes: variant %d (x %+d, y %+d, z %+d; F7 tries the next)", axes_pick,
                 axes_sign[axes_pick][0], axes_sign[axes_pick][1], axes_sign[axes_pick][2]);
     }
