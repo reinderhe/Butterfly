@@ -46,10 +46,21 @@ tar -xf "%ZIP%" -C "%SRCDIR%"
 if errorlevel 1 (echo Unzipping failed. & pause & exit /b 1)
 set "REPO="
 for /d %%D in ("%SRCDIR%\*") do set "REPO=%%D"
-rem (each folder of the code mirrored, so a file the code no longer has does not stay behind and get built)
+rem (each folder of the code mirrored, so a file the code no longer has does not stay behind and get built; but
+rem third_party only added to, as it also holds the tools' ready-made libraries the code doesn't have (SDL2.dll, SDL3.dll),
+rem with its a64-kit, all code, mirrored)
 for /d %%D in ("%REPO%\*") do (
-    robocopy "%%D" "%TOOLS%\%%~nxD" /MIR /NFL /NDL /NJH /NJS /NP >nul
+    if /i "%%~nxD"=="third_party" (
+        robocopy "%%D" "%TOOLS%\third_party" /E /NFL /NDL /NJH /NJS /NP >nul
+        robocopy "%%D\a64-kit" "%TOOLS%\third_party\a64-kit" /MIR /NFL /NDL /NJH /NJS /NP >nul
+    ) else (
+        robocopy "%%D" "%TOOLS%\%%~nxD" /MIR /NFL /NDL /NJH /NJS /NP >nul
+    )
     if errorlevel 8 (echo Copying the code failed. & pause & exit /b 1)
+)
+rem (the ready-made libraries a first build_ssr_longshot.bat lost, put back from the Hookshot-based tools)
+if exist "%BASE%\tools\third_party\sdl2\SDL3.dll" if not exist "%TOOLS%\third_party\sdl2\SDL3.dll" (
+    robocopy "%BASE%\tools\third_party" "%TOOLS%\third_party" /E /XC /XN /XO /NFL /NDL /NJH /NJS /NP >nul
 )
 robocopy "%REPO%" "%TOOLS%" /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 (echo Copying the code failed. & pause & exit /b 1)
