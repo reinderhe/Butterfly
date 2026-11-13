@@ -419,13 +419,27 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
             AcquireSRWLockShared(&fusion_lock);
             quat_mul(yaw_fix, qs[i], q);
             ReleaseSRWLockShared(&fusion_lock);
-            if (cj) q[0] = -q[0], q[1] = -q[1], q[2] = -q[2];
         } else {
             fused(m, q);
         }
         float acc[3], rev[3];
         if (integ) fusion_axes(m, axv, acc, rev);
         else memcpy(acc, m->accel, 12), memcpy(rev, m->gyro, 12);
+        if (integ && cj) {
+            /* handed out the other way round (R' = R^T, R the Joy-Con's turn into the world): the rates and acceleration in
+               the axes that R' implies, so all three agree as they did (a swing's force is read from them along the way the
+               Joy-Con faces: in the old axes a forehand came out weak). R' turning at w' needs w' = -R w; gravity seen in
+               R''s axes is R'^T g = R g, so a reading a = R^T g + linear part becomes R (R a). */
+            float r[9], t[3];
+            matrix_of(q, r);
+            for (int k = 0; k < 3; k++) t[k] = r[3 * k] * rev[0] + r[3 * k + 1] * rev[1] + r[3 * k + 2] * rev[2];
+            for (int k = 0; k < 3; k++) rev[k] = -t[k];
+            for (int pass = 0; pass < 2; pass++) {
+                for (int k = 0; k < 3; k++) t[k] = r[3 * k] * acc[0] + r[3 * k + 1] * acc[1] + r[3 * k + 2] * acc[2];
+                memcpy(acc, t, sizeof t);
+            }
+            q[0] = -q[0], q[1] = -q[1], q[2] = -q[2];
+        }
         for (int k = 0; k < 3; k++) dps[k] = rev[k] * 360.0f;
         memset(GP(e), 0, ENTRY);
         G64(e) = (uint64_t)(live ? fusion_base + h[i].n : fusion_last - i);
