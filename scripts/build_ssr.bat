@@ -111,6 +111,7 @@ if exist "%GAME%\longshot.exe" (
     echo cd /d "%%~dp0"
     echo set "RX_VK_DUMP_KEY=1"
     echo set "RX_VK_DUMP_DIR=%%~dp0dumps"
+    echo if not exist "%%~dp0dumps" mkdir "%%~dp0dumps"
     echo set "EDEN_NX2_GAME_PUSH_CONSTANTS=1"
     echo rem set "BUTTERFLY_MOTION_AXES=7"
     echo start "" butterfly.exe

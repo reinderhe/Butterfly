@@ -280,6 +280,7 @@ void dump_present(int64_t presents) {
         if (targets[i] == presents) armed_until = presents + counts[i];
     seq = 0;
     const char* base = getenv("RX_VK_DUMP_DIR") ? getenv("RX_VK_DUMP_DIR") : getenv("RX_VK_SHOTS");
+    if (base) _mkdir(base);   // (the folder RX_VK_DUMP_DIR names may not be there yet: diagnostics.bat's dumps)
     dir = std::string(base ? base : ".") + "/dump_" + std::to_string(presents);
     _mkdir(dir.c_str());
     logf("vk: dumping the frame after present %lld to %s", (long long)presents, dir.c_str());
