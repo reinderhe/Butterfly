@@ -59,6 +59,21 @@ HLE(_ZN2nn3hid28SetNpadJoyAssignmentModeDualERKj) { set_single(G32(ARG(0)), 0); 
 HLE(_ZN2nn3hid18SwapNpadAssignmentERKjS2_) { RET(0); }
 HLE(_ZN2nn3hid23MergeSingleJoyAsDualJoyERKjS2_) { RET(0); }
 
+/* (diagnostic) each place the game calls a motion function from, once: which code reads the motion when */
+static void hid_seen(Ctx *c, const char *fn, uint32_t handle) {
+    static SRWLOCK lock = SRWLOCK_INIT;
+    static struct { const char *fn; uint64_t lr; } seen[48];
+    static int n;
+    const uint64_t lr = c->x[30];
+    AcquireSRWLockExclusive(&lock);
+    int i = 0;
+    while (i < n && !(seen[i].fn == fn && seen[i].lr == lr)) i++;
+    const int fresh = i == n && n < 48;
+    if (fresh) seen[n].fn = fn, seen[n].lr = lr, n++;
+    ReleaseSRWLockExclusive(&lock);
+    if (fresh) hos_log("hid: %s (handle %#x) called from lr %#llx", fn, handle, (unsigned long long)lr);
+}
+
 /* ---- six-axis extras ------------------------------------------------------------------------------------------- */
 /* IsSixAxisSensorAtRest(handle) -> bool: the motion pad lying still (pad_sdl.c's filter). Switch Sports' calibration
    asks for the Joy-Con laid on a table and waits for this */
@@ -70,6 +85,7 @@ HLE(_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE) {
     static ULONGLONG said;
     const ULONGLONG now = GetTickCount64();
     const uint32_t handle = hos_guest_range(ARG(0), 4) ? G32(ARG(0)) : 0;
+    hid_seen(c, "IsSixAxisSensorAtRest", handle);
     /* (the change, and every 2 s while it is asked: the sensors' noise, to set HOS_MOTION_REST_* from a real Joy-Con) */
     if (still != was || now - said >= 2000) {
         hos_log("hid: at rest? %s (handle %#x; gyro spread %.4f rad/s, accel spread %.4f G, |accel| %.3f G)",
@@ -85,7 +101,9 @@ HLE(_ZN2nn3hid25SetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleERKNS0_22Gy
 /* ---- sensor fusion ---------------------------------------------------------------------------------------------- */
 #define FUSION_HANDLE 0x5346u   /* ("SF") */
 #define ENTRY 0x50
-static volatile int fusion_enabled;
+static volatile int fusion_on[2];   /* (each Joy-Con of the pair: its own handle, FUSION_HANDLE + 0 left, + 1 right, both
+                                       the one motion pad's; the game turns them on and off one at a time) */
+static int fusion_slot(uint32_t h) { return h == FUSION_HANDLE + 1 ? 1 : h == FUSION_HANDLE ? 0 : -1; }
 static float yaw_fix[4] = {0, 0, 0, 1};   /* applied on the world's side (ResetSensorFusionYaw) */
 static SRWLOCK fusion_lock = SRWLOCK_INIT;
 static int64_t fusion_base, fusion_last;
@@ -94,23 +112,38 @@ static int fusion_was_live;
 HLE(_ZN2nn3hid25GetSensorFusionMemorySizeEv) { RET(0x1000); }
 HLE(_ZN2nn3hid29GetSensorFusionWorkBufferSizeEv) { RET(0x1000); }
 HLE(_ZN2nn3hid22InitializeSensorFusionEPvm) { RET(0); }
-HLE(_ZN2nn3hid20FinalizeSensorFusionEv) { fusion_enabled = 0; }
-/* GetSensorFusionHandles(SensorFusionHandle*, int, unsigned int const& npad, BitFlagSet styles) -> int: one, No.1's */
+HLE(_ZN2nn3hid20FinalizeSensorFusionEv) { fusion_on[0] = fusion_on[1] = 0; hos_log("hid: sensor fusion finalized"); }
+/* GetSensorFusionHandles(SensorFusionHandle*, int, unsigned int const& npad, BitFlagSet styles) -> int: No.1's, one per
+   Joy-Con a pair has (left, right: the game picks min(count - 1, its Joy-Con's index)), else one */
 HLE(_ZN2nn3hid22GetSensorFusionHandlesEPNS0_18SensorFusionHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {
     static int logged;
     if (logged++ < 4) hos_log("hid: sensor fusion handles asked for: npad %u, %d wanted, styles %#x", G32(ARG(2)), (int)ARG(1),
                               (uint32_t)ARG(3));
     if ((int)ARG(1) < 1 || G32(ARG(2)) != NPAD_NO1) { RET(0); return; }
-    G32(ARG(0)) = FUSION_HANDLE;
-    RET(1);
+    const int n = (int)ARG(1) >= 2 && ((uint32_t)ARG(3) & STYLE_JOYDUAL) ? 2 : 1;
+    for (int i = 0; i < n; i++) G32(ARG(0) + 4 * (uint64_t)i) = FUSION_HANDLE + (uint32_t)i;
+    RET(n);
 }
 HLE(_ZN2nn3hid18EnableSensorFusionENS0_18SensorFusionHandleEPvm) {
-    if (!fusion_enabled) hos_log("hid: sensor fusion on (the orientation from the motion controls)");
-    fusion_enabled = 1;
+    const int k = fusion_slot((uint32_t)ARG(0));
+    hid_seen(c, "EnableSensorFusion", (uint32_t)ARG(0));
+    if (k < 0) { RET(0); return; }
+    if (!fusion_on[k]) hos_log("hid: sensor fusion on for the %s Joy-Con (the orientation from the motion controls)", k ? "right" : "left");
+    fusion_on[k] = 1;
     RET(0);
 }
-HLE(_ZN2nn3hid19DisableSensorFusionENS0_18SensorFusionHandleE) { fusion_enabled = 0; RET(0); }
-HLE(_ZN2nn3hid21IsSensorFusionEnabledENS0_18SensorFusionHandleE) { RET(fusion_enabled ? 1 : 0); }
+HLE(_ZN2nn3hid19DisableSensorFusionENS0_18SensorFusionHandleE) {
+    const int k = fusion_slot((uint32_t)ARG(0));
+    hid_seen(c, "DisableSensorFusion", (uint32_t)ARG(0));
+    if (k >= 0 && fusion_on[k]) hos_log("hid: sensor fusion off for the %s Joy-Con", k ? "right" : "left");
+    if (k >= 0) fusion_on[k] = 0;
+    RET(0);
+}
+HLE(_ZN2nn3hid21IsSensorFusionEnabledENS0_18SensorFusionHandleE) {
+    const int k = fusion_slot((uint32_t)ARG(0));
+    hid_seen(c, "IsSensorFusionEnabled", (uint32_t)ARG(0));
+    RET(k >= 0 && fusion_on[k] ? 1 : 0);
+}
 HLE(_ZN2nn3hid18UpdateSensorFusionENS0_18SensorFusionHandleE) { RET(0); }
 
 /* the quaternion (x, y, z, w) of a rotation matrix (rows), and back */
@@ -155,6 +188,7 @@ static void fused(const HosMotionState *m, float q[4]) {
 }
 /* ResetSensorFusionYaw(handle): the way the Joy-Con points now is straight ahead */
 HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
+    hid_seen(c, "ResetSensorFusionYaw", (uint32_t)ARG(0));
     int hos_sdl_motion_history(HosMotionSample *out, int max);   /* pad_sdl.c */
     HosMotionSample h[1];
     if (hos_sdl_motion_history(h, 1) == 1) {
@@ -168,6 +202,7 @@ HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
 }
 /* GetSensorFusionOrientations(SensorFusionOrientation* out, int max, SensorFusionHandle) -> int: newest first */
 HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_18SensorFusionHandleE) {
+    hid_seen(c, "GetSensorFusionOrientations", (uint32_t)ARG(2));
     const uint64_t out = ARG(0);
     const int max = (int)ARG(1) < 1 ? 0 : (int)ARG(1) > HOS_MOTION_HISTORY ? HOS_MOTION_HISTORY : (int)ARG(1);
     if (!max || !hos_guest_range(out, (uint64_t)max * ENTRY)) { RET(0); return; }
