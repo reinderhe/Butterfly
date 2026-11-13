@@ -221,6 +221,87 @@ static void fused(const HosMotionState *m, float q[4]) {
     quat_mul(yaw_fix, d, q);
     ReleaseSRWLockShared(&fusion_lock);
 }
+/* The orientation integrated from the very angular velocity and acceleration handed out with it (+0x24, +0x18), so the
+   three always agree: the game steered right from those before it took the Joy-Con for calibrated, and wrong from an
+   orientation built another way. The Joy-Con's own rates turn it (q' = q (x) w dt, q the Joy-Con's turn into the world),
+   and the accelerometer pulls its tilt toward gravity (Mahony, as the console's fusion corrects drift); lying flat (the
+   accelerometer reading 0, 0, -1 G) is no turn, and the yaw is the game's to reset. BUTTERFLY_MOTION_FLIP set: the
+   direction-matrix orientation instead (the earlier tries). */
+static SRWLOCK integ_lock = SRWLOCK_INIT;
+static float integ_q[4] = {0, 0, 0, 1};
+static float integ_ring[HOS_MOTION_HISTORY][4];
+static int64_t integ_n = -1;   /* the newest reading integrated (its own count) */
+static int use_integration(void) {
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("BUTTERFLY_MOTION_FLIP");
+        v = !(e && *e);
+        hos_log("hid: sensor fusion: %s", v ? "the orientation integrated from the rates handed out with it"
+                                            : "the direction-matrix orientation (BUTTERFLY_MOTION_FLIP set)");
+    }
+    return v;
+}
+static void q_norm(float q[4]) {
+    const float n = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (n > 0) for (int i = 0; i < 4; i++) q[i] /= n;
+    else q[0] = q[1] = q[2] = 0, q[3] = 1;
+}
+/* the turn that takes (0, 0, -1) to the reading a (the tilt alone, no yaw) */
+static void q_from_accel(const float *a, float q[4]) {
+    const float n = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    if (n < 1e-3f) { q[0] = q[1] = q[2] = 0, q[3] = 1; return; }
+    /* the Joy-Con's turn R has R^T (0,0,-1) = a/|a|: q is the turn from a/|a| to (0, 0, -1) */
+    const float u[3] = {a[0] / n, a[1] / n, a[2] / n}, v[3] = {0, 0, -1};
+    const float d = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    if (d < -0.9999f) { q[0] = 1, q[1] = q[2] = q[3] = 0; return; }
+    q[0] = u[1] * v[2] - u[2] * v[1], q[1] = u[2] * v[0] - u[0] * v[2], q[2] = u[0] * v[1] - u[1] * v[0], q[3] = 1 + d;
+    q_norm(q);
+}
+static void integrate_one(const HosMotionSample *s) {
+    const HosMotionState *m = &s->st;
+    float dt = s->dt_ns > 0 ? (float)s->dt_ns * 1e-9f : 0.005f;
+    if (dt > 0.1f) dt = 0.1f;
+    float w[3];
+    for (int k = 0; k < 3; k++) w[k] = m->gyro[k] * 6.28318531f;   /* (turns a second: radians a second) */
+    const float an = sqrtf(m->accel[0] * m->accel[0] + m->accel[1] * m->accel[1] + m->accel[2] * m->accel[2]);
+    if (an > 0.8f && an < 1.2f) {
+        float r[9];
+        matrix_of(integ_q, r);
+        const float v[3] = {-r[6], -r[7], -r[8]};   /* the reading lying this way would give: R^T (0, 0, -1) */
+        const float a[3] = {m->accel[0] / an, m->accel[1] / an, m->accel[2] / an};
+        const float e[3] = {a[1] * v[2] - a[2] * v[1], a[2] * v[0] - a[0] * v[2], a[0] * v[1] - a[1] * v[0]};
+        const float kp = 1.0f;
+        for (int k = 0; k < 3; k++) w[k] += kp * e[k];
+    }
+    const float x = integ_q[0], y = integ_q[1], z = integ_q[2], q0 = integ_q[3];
+    const float hd = 0.5f * dt;
+    integ_q[0] += hd * (q0 * w[0] + y * w[2] - z * w[1]);
+    integ_q[1] += hd * (q0 * w[1] - x * w[2] + z * w[0]);
+    integ_q[2] += hd * (q0 * w[2] + x * w[1] - y * w[0]);
+    integ_q[3] += hd * (-x * w[0] - y * w[1] - z * w[2]);
+    q_norm(integ_q);
+}
+/* each reading of h (newest first) its integrated orientation, into qs */
+static void integrated(const HosMotionSample *h, int live, float qs[][4]) {
+    AcquireSRWLockExclusive(&integ_lock);
+    if (integ_n < 0 || h[0].n < integ_n) {
+        q_from_accel(h[live - 1].st.accel, integ_q);   /* (first, or a new motion pad: the tilt from gravity; a gap is
+                                                          integrated over from what is left of it) */
+        integ_n = h[live - 1].n;
+        memcpy(integ_ring[integ_n % HOS_MOTION_HISTORY], integ_q, 16);
+    }
+    for (int i = live - 1; i >= 0; i--) {
+        if (h[i].n <= integ_n) continue;
+        integrate_one(&h[i]);
+        integ_n = h[i].n;
+        memcpy(integ_ring[integ_n % HOS_MOTION_HISTORY], integ_q, 16);
+    }
+    for (int i = 0; i < live; i++) {
+        if (integ_n - h[i].n < HOS_MOTION_HISTORY) memcpy(qs[i], integ_ring[h[i].n % HOS_MOTION_HISTORY], 16);
+        else memcpy(qs[i], integ_q, 16);
+    }
+    ReleaseSRWLockExclusive(&integ_lock);
+}
 /* ResetSensorFusionYaw(handle): the way the Joy-Con points now is straight ahead */
 HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
     hid_seen(c, "ResetSensorFusionYaw", (uint32_t)ARG(0));
@@ -228,7 +309,13 @@ HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
     HosMotionSample h[1];
     if (hos_sdl_motion_history(h, 1) == 1) {
         float d[4], m[9];
-        device_quat(h[0].st.direction, d);
+        if (use_integration()) {
+            AcquireSRWLockShared(&integ_lock);
+            memcpy(d, integ_q, sizeof d);
+            ReleaseSRWLockShared(&integ_lock);
+        } else {
+            device_quat(h[0].st.direction, d);
+        }
         matrix_of(d, m);
         const float yaw = atan2f(m[3], m[0]);   /* (the Joy-Con's x axis in the world: column 0) */
         AcquireSRWLockExclusive(&fusion_lock);
@@ -259,11 +346,22 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
     const int status = live && hos_sdl_motion_calibrated() ? 2 : 0;
     static const HosMotionState at_rest = {{0, 0, -1}, {0, 0, 0}, {0, 0, 0}, {1, 0, 0, 0, 1, 0, 0, 0, 1}};
     const int n = live ? live : 1;
+    static float qs[HOS_MOTION_HISTORY][4];   /* (under the history's own order: one caller at a time below) */
+    static SRWLOCK out_lock = SRWLOCK_INIT;
+    const int integ = use_integration() && live;
+    AcquireSRWLockExclusive(&out_lock);
+    if (integ) integrated(h, live, qs);
     for (int i = 0; i < n; i++) {
         const uint64_t e = out + (uint64_t)i * ENTRY;
         const HosMotionState *m = live ? &h[i].st : &at_rest;
         float q[4], dps[3];
-        fused(m, q);
+        if (integ) {
+            AcquireSRWLockShared(&fusion_lock);
+            quat_mul(yaw_fix, qs[i], q);
+            ReleaseSRWLockShared(&fusion_lock);
+        } else {
+            fused(m, q);
+        }
         for (int k = 0; k < 3; k++) dps[k] = m->gyro[k] * 360.0f;
         memset(GP(e), 0, ENTRY);
         G64(e) = (uint64_t)(live ? fusion_base + h[i].n : fusion_last - i);
@@ -274,6 +372,7 @@ HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_
         memcpy(GP(e + 0x30), q, 16);
         *(uint8_t *)GP(e + 0x40) = (uint8_t)status;
     }
+    ReleaseSRWLockExclusive(&out_lock);
     HOS_WRITTEN(GP(out), (size_t)n * ENTRY);
     static int logged;
     if (!logged++) hos_log("hid: sensor fusion: first orientations (%s)", live ? "a pad with motion" : "no pad with motion: at rest");
