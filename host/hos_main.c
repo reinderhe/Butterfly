@@ -1614,6 +1614,8 @@ static void game_switches(void) {
 #else
         setenv("EDEN_NX2_GAME_PUSH_CONSTANTS", "1", 0);
 #endif
+        fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",
+                getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") ? getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") : "(unset)");
     }
 }
 int main(int argc, char **argv) {

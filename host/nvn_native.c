@@ -1754,8 +1754,18 @@ NV(nvnCommandBufferPushGraphicsConstants) {
     memcpy(p + 8, &u, sizeof u);
     memcpy(p + 8 + sizeof u, PN(4, n), n);
     static volatile LONG logged;
-    if (InterlockedIncrement(&logged) <= 4)
+    if (InterlockedIncrement(&logged) <= 4) {
         hos_log("nvn: PushGraphicsConstants: %u bytes at %#llx (stage %u)", (unsigned)n, (unsigned long long)off, U32(1));
+        const uint32_t *w = (const uint32_t *)PN(4, n);
+        char line[600];
+        int k = 0;
+        for (uint32_t i = 0; i < n / 4 && k < (int)sizeof line - 40; i++) {
+            float f;
+            memcpy(&f, &w[i], 4);
+            k += snprintf(line + k, sizeof line - k, " %02x:%g/%#x", i * 4, f, w[i]);
+        }
+        hos_log("nvn:   pushed:%s", line);
+    }
 }
 /* (hookshot) nvnQueueWaitSync(queue, sync): the queue's later work waits on the GPU for the sync's fence. Every
    NVN queue replays in one stream in submit order, so a fence submitted before this already came first; a sync not

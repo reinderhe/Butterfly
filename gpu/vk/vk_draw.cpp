@@ -2595,13 +2595,28 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
     }
     // (butterfly) bank 24 (the translator's 17) for a graphics stage: the game's PushGraphicsConstants, when it pushes them
     // (EDEN_NX2_GAME_PUSH_CONSTANTS: the translator then keeps the reads, BlitConstantsPass)
-    static const bool game_push = getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") != nullptr;
+    static const bool game_push = [] {
+        const bool on = getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") != nullptr;
+        logf("vk: graphics push constants as bank 17: %s", on ? "on" : "off");
+        return on;
+    }();
     if (index == 17 && game_push && st.nvn_stage != 5) {
         const uint32_t n = std::clamp<uint32_t>((used + 15) & ~15u, 16, (uint32_t)sizeof s.gfx_push);
         const uint64_t at = stream_alloc(n, align);
         if (at == UINT64_MAX) return bi;
         std::memset(cur->mapped + at, 0, n);
         std::memcpy(cur->mapped + at, s.gfx_push, std::min(n, s.gfx_push_n));
+        {   // (the first few programs served, with what they got)
+            static std::mutex lm;
+            static std::unordered_set<uint64_t> told;
+            std::lock_guard lk(lm);
+            if (told.size() < 16 && cur_program && told.insert(cur_program->key ^ ((uint64_t)st.nvn_stage << 60)).second) {
+                const float* f = (const float*)s.gfx_push;
+                logf("vk: bank 24 (17) for %016llx stage %d: %u bytes read, %u pushed: %g %g %g %g | %g %g %g %g | %g %g %g %g",
+                     (unsigned long long)cur_program->key, st.nvn_stage, used, s.gfx_push_n, f[0], f[1], f[2], f[3], f[12],
+                     f[13], f[14], f[15], f[16], f[17], f[18], f[20]);
+            }
+        }
         return {cur->stream, at, n};
     }
     if (index == 1) {
