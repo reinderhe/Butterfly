@@ -551,13 +551,31 @@ int hos_sdl_motion_history(HosMotionSample *out, int max) {
     ReleaseSRWLockShared(&state_lock);
     return n;
 }
-/* (butterfly) whether the pad with motion lies still (both sensors steady for HOS_MOTION_STILL_S), for IsSixAxisSensorAtRest:
-   Switch Sports calibrates with the Joy-Con laid on a table */
-int hos_sdl_motion_still(void) {
+/* (butterfly) whether the pad with motion lies at rest (HOS_MOTION_REST_*), for IsSixAxisSensorAtRest: Switch Sports
+   calibrates with the Joy-Con laid on a table. stats (may be null): the gyroscope's and accelerometer's spread and the
+   acceleration's size, for the log; -1 there with no motion pad */
+int hos_sdl_motion_still(float stats[3]) {
     AcquireSRWLockShared(&state_lock);
-    const int still = motion_live && motion.still_t >= HOS_MOTION_STILL_S;
+    const int still = motion_live && motion.rest_t >= HOS_MOTION_REST_S;
+    if (stats) {
+        stats[0] = motion_live ? sqrtf(motion.gvar) : -1;
+        stats[1] = motion_live ? sqrtf(motion.avar) : -1;
+        stats[2] = motion_live ? motion.amean : -1;
+    }
     ReleaseSRWLockShared(&state_lock);
     return still;
+}
+/* (butterfly) whether the motion pad's sensors are calibrated, as the Switch 2's sensor fusion reports it (its orientation's
+   status bit 1, which Switch Sports' calibration screen waits for): once it has lain at rest a moment (the gyroscope's
+   zero learned, or a second at rest by the looser test), and from then on */
+int hos_sdl_motion_calibrated(void) {
+    static volatile int calibrated;
+    if (calibrated) return 1;
+    AcquireSRWLockShared(&state_lock);
+    const int now = motion_live && (motion.learned_t >= 0.5f || motion.rest_t >= 1.0f);
+    ReleaseSRWLockShared(&state_lock);
+    if (now) calibrated = 1, hos_log("hid: the Joy-Con's motion sensors are calibrated (it lay at rest)");
+    return now;
 }
 /* (the Insert menu's Motion controls row) 0 no controller, 1 controllers with no gyroscope, 2 one with a gyroscope */
 int hos_sdl_gyro_status(void) { return (int)gyro_status; }
