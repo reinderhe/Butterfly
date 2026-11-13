@@ -20,6 +20,7 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCK = os.path.join(HERE, "..", "tools.lock")
 SKIP = {"python"}   # (running this)
+USER_AGENT = "longshot-builder-butterfly/1"   # (Cloudflare answers 403 to urllib's default agent, as magicbean_login.py says)
 
 
 def lock_tools(system="windows-x64"):
@@ -50,7 +51,7 @@ def download(tool, into):
         try:
             h = hashlib.sha256()
             n = 0
-            with urllib.request.urlopen(url, timeout=60) as r, open(into, "wb") as out:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": USER_AGENT}), timeout=60) as r, open(into, "wb") as out:
                 while True:
                     block = r.read(1 << 20)
                     if not block:
@@ -116,8 +117,12 @@ def main():
         os.close(fd)
         try:
             if not download(tool, archive):
-                print("tools: %s could not be fetched from any address" % name)
-                bad += 1
+                if os.path.isdir(dest):
+                    # (the older one this folder has builds too, most likely: said, and the build goes on with it)
+                    print("tools: %s could not be fetched from any address; the build uses the older one this folder has" % name)
+                else:
+                    print("tools: %s could not be fetched from any address" % name)
+                    bad += 1
                 continue
             unpack(archive, tool["prefix"], dest)
             have[name] = tool["version"]
