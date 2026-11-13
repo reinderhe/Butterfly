@@ -1177,10 +1177,17 @@ bool unswizzle_ready() {
 
 /// The whole texture (every level and layer dirty overlaps) unswizzled on the GPU; false: not a texture for it
 bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
+    // (butterfly) and the game's own BC textures (BC1-BC7 in its files, not the ASTC Longshot encodes to BC3: tex.bc): their raw
+    // views (one 8- or 16-byte block a texel, vk_texture's image flags) take the blocks as an uncompressed texture's texels.
+    // Sports Resort's stages and characters load hundreds of them at a scene change, normal maps of 6000 x 6000 among them:
+    // 460 MB unswizzled on the CPU in one frame, the 19-21 fps at each change and the high-five scene's drop. One layer only
+    // (a block-texel view of several layers is not every driver's). RX_VK_GPU_UNSWIZZLE_BC=0: on the CPU, as before
+    static const bool bc_off = getenv("RX_VK_GPU_UNSWIZZLE_BC") && !atoi(getenv("RX_VK_GPU_UNSWIZZLE_BC"));
+    const bool block = is_bc(tex.format) && !tex.bc && !bc_off && tex.layers == 1 && (tex.bpb == 8 || tex.bpb == 16);
     if (tex.type != VK_IMAGE_TYPE_2D || tex.astc || tex.bc || !(tex.usage & VK_IMAGE_USAGE_STORAGE_BIT) ||
-        is_bc(tex.format) || is_astc(tex.format) || is_depth_format(tex.format) || nvn_tex_is_linear(&tex.d))
+        (is_bc(tex.format) && !block) || is_astc(tex.format) || is_depth_format(tex.format) || nvn_tex_is_linear(&tex.d))
         return false;
-    if (total < (8u << 20) || tex.block_w != 1 || tex.block_h != 1) return false;
+    if (block ? total < (1u << 20) : (total < (8u << 20) || tex.block_w != 1 || tex.block_h != 1)) return false;
     int widen_from = 0;
     widened(tex.d.format ? vk_format(tex.nvn_format).format : tex.format, &widen_from);
     if (widen_from) return false;
