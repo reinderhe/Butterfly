@@ -1703,8 +1703,10 @@ static void game_switches(void) {
     if (hos_program_id == 0x04008E001F098000ull) {
 #ifdef _WIN32
         if (!getenv("EDEN_NX2_GAME_PUSH_CONSTANTS")) _putenv("EDEN_NX2_GAME_PUSH_CONSTANTS=1");
+        _putenv("BUTTERFLY_GAME=ssr");   /* (the menu's welcome: gpu/vk/vk_menu.cpp welcome_wanted) */
 #else
         setenv("EDEN_NX2_GAME_PUSH_CONSTANTS", "1", 0);
+        setenv("BUTTERFLY_GAME", "ssr", 1);
 #endif
         /* (Joy-Cons one at a time and upright, their motion in their own frame, as Switch Sports holds them: SDL's
            hints, which it reads from the environment) */
@@ -1715,6 +1717,10 @@ static void game_switches(void) {
         setenv("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS", "0", 0);
         setenv("SDL_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS", "1", 0);
 #endif
+        {   /* (its depth mode, near = 0, from the start: the shaders prepared before its device are made for it) */
+            void nvn_depth_default(int minus_w);   /* host/nvn_native.c */
+            nvn_depth_default(0);
+        }
         fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",
                 getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") ? getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") : "(unset)");
     }

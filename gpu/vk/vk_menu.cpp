@@ -1638,6 +1638,7 @@ std::string restart_list(const char* last) {
     return mr::names(tr_names(), restart_state.n, restart_pending(), ", ", last);
 }
 int ask_sel = 0;   // (the restart question's choice: 0 Later, 1 Restart now)
+int welcome_sel = 1;   // (butterfly: the welcome's choice: 0 Open Settings, 1 Let's Play)
 
 /// A row on its tab: the debug tools only with them on; a row for what this PC cannot run not at all (Reflex and Anti-Lag 2
 /// only where the driver has them, the Upscaler only where more than the game's own runs, the DLSS model only where DLSS
@@ -2474,8 +2475,8 @@ const std::vector<int>& bindable_keys() {
     }
     return k;
 }
-int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 the inventory, 5 the restart question (2: was the
-                       // debug tools' own page, now on the Debug tab)
+int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 the inventory, 5 the restart question, 6 the
+                       // welcome (butterfly) (2: was the debug tools' own page, now on the Debug tab)
 int csel = 0, ccol = menu_hit::kCtlPrimary;   // the page's row (options, then bindings and reset) and binding column
 const int kTop = tab_row_count(TAB_PAGE);   // (Layout preset and Button prompts: a preset shows in the grid at once)
 int listening = 0;     // waiting for the new input: 1 a gamepad's, 2 a key
@@ -3048,7 +3049,8 @@ void draw_options(ui::Ctx& c) {
     }
     {   // (which build, at the banner's left, so a report can say it without opening the log: as players see it, version_text,
         // "Longshot v3.0.0-rc.1" or "Longshot Nightly 46 · 434712bb"; the log and the bug report keep the whole name)
-        std::string ver = std::string("Butterfly \xc2\xb7 Longshot ") + version_text(LONGSHOT_VERSION);   // (butterfly: the Longshot it is built on)
+        const std::string lv = version_text(LONGSHOT_VERSION);   // (butterfly: the Longshot it is built on; a source build has no number)
+        std::string ver = lv.empty() || lv == "unknown" ? std::string("Butterfly \xc2\xb7 Longshot") : std::string("Butterfly \xc2\xb7 Longshot ") + lv;
         const float room = (c.w - total) * 0.5f - 60 * s - c.safe, px = 15 * s;
         const auto width = [&](float p) { return ui::size_of(c.f.body, p, ver.c_str()).x; };
         // (still too long, as a source build's "v2.0.11-821-g7b81752-dirty" since the Audio tab: at Small and Medium smaller
@@ -3596,6 +3598,53 @@ void draw_ask(ui::Ctx& c) {
     ui::prompt_bar(c, prompt_list, 3);
 }
 
+/// (butterfly) The welcome, once, on the first start of Sports Resort: how its Joy-Cons connect, calibrate and turn off,
+/// and where the settings are. As the restart question: a box with the banner's strip, two buttons (Open Settings, Let's
+/// Play, the default); butterfly_welcome.txt beside the game once it is closed (menu_tick welcome_done)
+void draw_welcome(ui::Ctx& c) {
+    const float s = c.s, W = 760 * s, H = 474 * s;
+    const ImVec2 p((c.w - W) * 0.5f, (c.h - H) * 0.5f), q = p + ImVec2(W, H);
+    ui::shadow(c, p, q, 30 * s, 1.0f, 8 * s);
+    c.d->AddRectFilled(p, q, ui::kBox);
+    c.d->AddRect(p, q, ui::kBoxEdge, 0, 2 * s);
+    const float hb = 64 * s;
+    c.d->AddRectFilledMultiColor(p, ImVec2(q.x, p.y + hb), ui::kBannerTop, ui::kBannerTop, ui::kBanner, ui::kBanner);
+    c.d->AddRectFilled(ImVec2(p.x, p.y + hb - 3 * s), ImVec2(q.x, p.y + hb), ui::kBannerEdge);
+    float aspect = 1;
+    const float lh = 46 * s;
+    float tx = p.x + 28 * s;
+    if (ImTextureData* logo = ui::logo(&aspect)) {
+        c.d->AddImage(logo->GetTexRef(), ImVec2(tx, p.y + (hb - lh) * 0.5f - 1 * s), ImVec2(tx + lh * aspect, p.y + (hb + lh) * 0.5f - 1 * s));
+        tx += lh * aspect + 14 * s;
+    }
+    ui::text_mid(c, c.f.heading, 26 * s, tx, p.y + hb * 0.5f - 1 * s, ui::kBannerInk, "Welcome to Butterfly");
+    struct Tip { const char* title; const char* text; };
+    static const Tip tips[] = {
+        {"Connect your Joy-Cons", "Hold the small sync button on the side of each Joy-Con. Butterfly pairs them with your PC by itself, "
+                                  "no Bluetooth settings needed."},
+        {"Calibrating", "When the game asks, lay the Joy-Cons flat on a table, buttons up, and keep them still for a moment."},
+        {"Settings", "Press F1 (or Insert) at any time for graphics, controls, motion and sound."},
+        {"When you are done", "Closing the game turns your Joy-Cons off. Press any button on one to wake it next time."},
+    };
+    float y = p.y + hb + 22 * s;
+    const float x0 = p.x + 34 * s, wrap = W - 34 * s - 52 * s;
+    for (const Tip& t : tips) {
+        ui::diamond(c, ImVec2(x0, y + 11 * s), 5 * s, ui::kGoldHi);
+        ui::text(c, c.f.strong, 19 * s, ImVec2(x0 + 18 * s, y), ui::kInkBright, t.title);
+        y += 26 * s;
+        y += ui::para(c, c.f.body, 16.5f * s, ImVec2(x0 + 18 * s, y), ui::kSoft, t.text, wrap) + 14 * s;
+    }
+    const float bw = 230 * s, bh = 48 * s, gap = 24 * s, by = q.y - bh - 24 * s, bx = (p.x + q.x) * 0.5f - bw - gap * 0.5f;
+    const char* labels[2] = {"Open Settings", "Let's Play"};
+    for (int i = 0; i < 2; i++) {
+        const ImVec2 a(bx + i * (bw + gap), by), b = a + ImVec2(bw, bh);
+        ui::button(c, a, b, labels[i], i == welcome_sel);
+        hits.add(a.x, a.y, b.x, b.y, menu_hit::kButton, i);
+    }
+    const ui::Prompt prompt_list[] = {{ui::kLeftRight, "Choose"}, {ui::kConfirm, "Confirm"}};
+    ui::prompt_bar(c, prompt_list, 2);
+}
+
 void draw_menu(ui::Ctx& c);
 /// The menu's text sizes at this window's unit, baked ahead by vk_imgui.cpp a few a frame: the first open then draws with no
 /// glyphs to make (it took 2.6 ms at 1080p)
@@ -3656,6 +3705,7 @@ void draw_menu(ui::Ctx& c) {
     const int vtx0 = c.d->VtxBuffer.Size, cmd0 = c.d->CmdBuffer.Size;
     hits.clear(0, 0, k.w, k.h);
     if (page == 5) draw_ask(k);
+    else if (page == 6) draw_welcome(k);
     else if (page == 1) draw_controls(k);
     else if (page == 3) draw_teleport(k);
     else if (page == 4) draw_inventory(k);
@@ -3949,7 +3999,7 @@ void draw_startup(ui::Ctx& c) {
     float y = top + lh + 16 * s;
     ui::spaced(c, c.f.heading, 42 * k, ImVec2(cx, y), ui::rgba(240, 252, 250), "BUTTERFLY", 6 * k);
     ui::flourish(c, cx - 190 * k, cx + 190 * k, y + 66 * k, ui::kAccent);
-    ui::text_centre(c, c.f.body, 14.5f * k, ImVec2(cx, y + 78 * k), ui::kDim, ("based on Longshot " + v.version).c_str());   // (butterfly)
+    ui::text_centre(c, c.f.body, 14.5f * k, ImVec2(cx, y + 78 * k), ui::kDim, (v.version.empty() || v.version == "unknown" ? std::string("based on Longshot") : "based on Longshot " + v.version).c_str());   // (butterfly)
     if (!v.title.empty()) {
         y += 120 * k;
         if (!v.step.empty()) {   // ("STEP 2 OF 2" as "Step 2 of 2")
@@ -4676,6 +4726,32 @@ void outputs_follow_screen() {
          dm::ratio_name({sw, sh}).c_str(), added);
 }
 
+/// (butterfly) The welcome (draw_welcome): shown once, a game started by Butterfly as Sports Resort (host/hos_main.c
+/// game_switches: BUTTERFLY_GAME), until butterfly_welcome.txt is beside the game. BUTTERFLY_WELCOME=1 shows it anyway
+std::string welcome_path() {
+    char exe[MAX_PATH];
+    const DWORD n = game_module_path(exe, MAX_PATH);
+    std::string dir(exe, n);
+    return dir.substr(0, dir.find_last_of("\\/") + 1) + "butterfly_welcome.txt";
+}
+bool welcome_wanted() {
+    if (env_on("BUTTERFLY_WELCOME")) return true;
+    const char* g = getenv("BUTTERFLY_GAME");
+    if (!g || strcmp(g, "ssr")) return false;
+    if (FILE* f = fopen(welcome_path().c_str(), "rb")) {
+        fclose(f);
+        return false;
+    }
+    return true;
+}
+void welcome_done() {
+    if (FILE* f = fopen(welcome_path().c_str(), "wb")) {
+        fputs("Butterfly's welcome was shown. Delete this file to see it again.\n", f);
+        fclose(f);
+    }
+    logf("menu: the welcome closed");
+}
+
 void menu_tick() {
     std::lock_guard lk(menu_mu);   // (the control bridge's settings: menu_setting_set)
     share_finish();   // (Save my pipeline list's worker, done)
@@ -4789,6 +4865,16 @@ void menu_tick() {
     if (press[12] && (GetAsyncKeyState(VK_SHIFT) & 0x8000)) tab_left = true, tab_right = false;
     bool changed = menu_refresh;
     menu_refresh = false;
+    {   // (butterfly) the welcome, once: two seconds of the game's own pictures after the start-up screen
+        static bool welcome_checked = false;
+        if (!welcome_checked && !startup_on.load() && game_frames.load(std::memory_order_relaxed) > 120) {
+            welcome_checked = true;
+            if (welcome_wanted() && !open_now.load()) {
+                open_now = true, page = 6, welcome_sel = 1, listening = 0, tune_mode = false, changed = true;
+                logf("menu: the welcome (the first start)");
+            }
+        }
+    }
     // (longshot) the mouse, while the menu is open: the cursor in the window image's pixels (mx, my), tested against the
     // controls as last drawn (hits, vk_menu_hit.h), whether it moved since the last frame, and its clicks and wheel since then
     MkwVkPointer ptr{};
@@ -4819,7 +4905,10 @@ void menu_tick() {
     // control can be bound to Esc, so nothing in play changes; the window gives the captured mouse back on the close)
     const bool esc_opens = opts.menu_shortcut == 2 && press[5] && !open_now.load();
     if (esc_opens) press[5] = false;
-    if ((press[0] || press[6]) && open_now.load() && page == 5) {
+    if ((press[0] || press[6]) && open_now.load() && page == 6) {   // (butterfly) the welcome: closed as Let's Play
+        welcome_done();
+        open_now = false, page = 0, changed = true;
+    } else if ((press[0] || press[6]) && open_now.load() && page == 5) {
         later();
     } else if ((press[0] || press[6]) && open_now.load() && restart_ask()) {
         page = 5, ask_sel = 0, listening = 0, changed = true;
@@ -4850,6 +4939,19 @@ void menu_tick() {
             pipeline_cache_save(true);
             open_now = false, page = 0, tune_mode = false, changed = true;
             PostMessageA(app_window(), WM_APP + 9, 0, 0);
+        }
+    } else if (open_now.load() && page == 6) {   // (butterfly) the welcome: Open Settings or Let's Play (the default)
+        if (mouse) {
+            const menu_hit::Hit hit = hits.at((float)mx, (float)my);
+            if (hit.part == menu_hit::kButton && (moved || ptr.pressed) && hit.index != welcome_sel) welcome_sel = hit.index, changed = true;
+            if ((ptr.pressed & HOS_MOUSE_LEFT) && hit.part == menu_hit::kButton) press[7] = true;
+        }
+        if (press[3] || press[4] || tab_left || tab_right) welcome_sel ^= 1, changed = true;
+        if (press[5] || press[7]) {
+            welcome_done();
+            if (press[7] && welcome_sel == 0) page = 0;   // (the settings, open)
+            else open_now = false, page = 0;
+            changed = true;
         }
     } else if (open_now.load() && page == 1) {   // (longshot) the Controls page
         using enum menu_hit::CtlColumn;

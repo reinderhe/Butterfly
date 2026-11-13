@@ -133,6 +133,7 @@ static int page, ask_sel, listening;
 static bool changed, tune_mode;   // (tune_mode: the compact bar, open; it opens when its key is held as the menu opens)
 static bool compact_key_held;     // (menu_tick's tune_down: Right Shift, or Right Ctrl, held)
 static bool restart_ask() { return false; }
+static void welcome_done() {}   // (butterfly: the welcome page, closed by Insert or F1 as Let's Play)
 static int detect_pad_layout() { return 0; }
 static void dlss_probe() {}
 static void fsr4_probe() {}

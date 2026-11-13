@@ -173,6 +173,10 @@ static volatile LONG depth_minus_w = 1;   /* (OoT's mode from the start: the sha
                                             translated without the depth conversion, and the menu's text and logo fell outside the depth range
                                             on a first start. d3zessete, Longshot PR 54) */
 int nvn_depth_minus_w(void) { return depth_minus_w != 0; }
+/* (butterfly) the mode to start in, for a game whose own is the other: Nintendo Switch Sports Resort sets near = 0, so the
+   shaders the build prepares (before any device) are made in its mode, not OoT's (they were all made again at its first
+   start, 10,000 of them). host/hos_main.c game_switches */
+void nvn_depth_default(int minus_w) { InterlockedExchange(&depth_minus_w, minus_w != 0); }
 uint64_t nvn_native_proc(const char *name);
 
 NV(nvnDeviceBuilderSetDefaults) { memset(P(0), 0, sizeof(nvn_dev_builder)); }
