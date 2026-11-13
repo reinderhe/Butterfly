@@ -1304,6 +1304,22 @@ static void memory_notice(void) {
     MessageBoxA(NULL, text, "Hookshot", MB_OK | MB_ICONWARNING);
 }
 #endif
+/* (butterfly) per game switches, before anything reads them (the Vulkan layer, the shader translator): Nintendo Switch
+   Sports Resort pushes its graphics constants itself (nvnCommandBufferPushGraphicsConstants), so the translator keeps the
+   shaders' reads of them rather than a blit's guessed values, and the replay serves them. (An EDEN_ variable: the
+   program cache keeps such programs apart) */
+static void game_switches(void) {
+    fprintf(stderr, "[hos host] game: program id %016llx\n", (unsigned long long)hos_program_id);
+    if (hos_program_id == 0x04008E001F098000ull) {
+#ifdef _WIN32
+        if (!getenv("EDEN_NX2_GAME_PUSH_CONSTANTS")) _putenv("EDEN_NX2_GAME_PUSH_CONSTANTS=1");
+#else
+        setenv("EDEN_NX2_GAME_PUSH_CONSTANTS", "1", 0);
+#endif
+        fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",
+                getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") ? getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") : "(unset)");
+    }
+}
 #ifdef _WIN32
 /* (hookshot) On laptops with two GPUs, the drivers run a program on the dedicated one when it exports these (NVIDIA Optimus, AMD
    PowerXpress): without them a laptop could put the game on its integrated GPU, 5 fps (issue 176) */
@@ -1346,6 +1362,7 @@ static int game_main(int argc, char **argv) {
 #ifdef _WIN32
     if (!narrow_paths_ok(argc, argv)) return 1;
     load_hookshot_env();
+    game_switches();
 #endif
     occlusion_switch();
     {
@@ -1602,21 +1619,6 @@ static DWORD WINAPI game_thread(void *p) {
 static void driver_cache_room(void) {
     setenv("__GL_SHADER_DISK_CACHE_SIZE", "10737418240", 0);   /* (10 GiB, bytes) */
     setenv("MESA_SHADER_CACHE_MAX_SIZE", "10G", 0);
-}
-/* (butterfly) per game switches, before anything reads them (the Vulkan layer, the shader translator): Nintendo Switch
-   Sports Resort pushes its graphics constants itself (nvnCommandBufferPushGraphicsConstants), so the translator keeps the
-   shaders' reads of them rather than a blit's guessed values, and the replay serves them. (An EDEN_ variable: the
-   program cache keeps such programs apart) */
-static void game_switches(void) {
-    if (hos_program_id == 0x04008E001F098000ull) {
-#ifdef _WIN32
-        if (!getenv("EDEN_NX2_GAME_PUSH_CONSTANTS")) _putenv("EDEN_NX2_GAME_PUSH_CONSTANTS=1");
-#else
-        setenv("EDEN_NX2_GAME_PUSH_CONSTANTS", "1", 0);
-#endif
-        fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",
-                getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") ? getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") : "(unset)");
-    }
 }
 int main(int argc, char **argv) {
     int hos_display_init(void);
