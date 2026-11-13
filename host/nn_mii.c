@@ -330,6 +330,24 @@ HLE(_ZN2nn3mii8Database3GetEPiPNS0_15CharInfoElementEii) {
     if (InterlockedIncrement(&logged) <= 4) hos_log("mii: Get(flags %d, room for %d) -> %d Miis", flag, cap, n);
     RET(0);
 }
+/* Database::GetIndex(int* index, CharInfo const&) const -> Result: the Mii's place in the database, by its create id;
+   not there (a default or random Mii, a guest): nn::mii's "not found" (the game then takes -1) */
+#define R_MII_NOT_FOUND ((126) | (4 << 9))
+HLE(_ZNK2nn3mii8Database8GetIndexEPiRKNS0_8CharInfoE) {
+    ensure_db();
+    int found = -1;
+    if (hos_guest_range(ARG(2), sizeof(CharInfo))) {
+        const uint8_t *id = (const uint8_t *)GP(ARG(2));
+        for (int i = 0; i < db_count && found < 0; i++)
+            if (!memcmp(db_miis[i].create_id, id, 16)) found = i;
+    }
+    if (found < 0) { RET(R_MII_NOT_FOUND); return; }
+    if (hos_guest_range(ARG(1), 4)) G32(ARG(1)) = (uint32_t)found;
+    RET(0);
+}
+/* Database::UpdateLatest(CharInfo* inout, int source_flag) const -> Result: the Miis never change while the game runs, so
+   the one handed in is the latest (left as it is) */
+HLE(_ZNK2nn3mii8Database12UpdateLatestEPNS0_8CharInfoEi) { RET(0); }
 /* Database::BuildRandom(CharInfo*, RandomDesc const& {age, gender, race}) -> Result (the SDK aborts on a failure) */
 HLE(_ZN2nn3mii8Database11BuildRandomEPNS0_8CharInfoERKNS0_10RandomDescE) {
     CharInfo ci;

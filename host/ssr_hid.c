@@ -60,8 +60,15 @@ HLE(_ZN2nn3hid18SwapNpadAssignmentERKjS2_) { RET(0); }
 HLE(_ZN2nn3hid23MergeSingleJoyAsDualJoyERKjS2_) { RET(0); }
 
 /* ---- six-axis extras ------------------------------------------------------------------------------------------- */
-/* IsSixAxisSensorAtRest(handle) -> bool: never (a held Joy-Con) */
-HLE(_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE) { RET(0); }
+/* IsSixAxisSensorAtRest(handle) -> bool: the motion pad lying still (pad_sdl.c's filter). Switch Sports' calibration
+   asks for the Joy-Con laid on a table and waits for this */
+HLE(_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE) {
+    int hos_sdl_motion_still(void);
+    const int still = hos_sdl_motion_still();
+    static int was = -1;
+    if (still != was) was = still, hos_log("hid: the Joy-Con is %s", still ? "at rest" : "moving");
+    RET(still);
+}
 /* GetGyroscopeZeroDriftMode(handle) -> GyroscopeZeroDriftMode: 1 standard (what the motion filter does) */
 HLE(_ZN2nn3hid25GetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleE) { RET(1); }
 HLE(_ZN2nn3hid25SetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleERKNS0_22GyroscopeZeroDriftModeE) {}

@@ -462,6 +462,14 @@ int hos_sdl_motion_history(HosMotionSample *out, int max) {
     ReleaseSRWLockShared(&state_lock);
     return n;
 }
+/* (butterfly) whether the pad with motion lies still (both sensors steady for HOS_MOTION_STILL_S), for IsSixAxisSensorAtRest:
+   Switch Sports calibrates with the Joy-Con laid on a table */
+int hos_sdl_motion_still(void) {
+    AcquireSRWLockShared(&state_lock);
+    const int still = motion_live && motion.still_t >= HOS_MOTION_STILL_S;
+    ReleaseSRWLockShared(&state_lock);
+    return still;
+}
 /* (the Insert menu's Motion controls row) 0 no controller, 1 controllers with no gyroscope, 2 one with a gyroscope */
 int hos_sdl_gyro_status(void) { return (int)gyro_status; }
 /* The first open controller's name into out ("" with none) */
