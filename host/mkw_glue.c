@@ -72,7 +72,7 @@ DWORD WINAPI hos_out_of_memory_box(LPVOID unused) {
                 "Close other programs, and in Windows' System > About > Advanced system settings > Performance > Advanced > Virtual "
                 "memory, choose \"Automatically manage paging file size\" (or give it at least 16 GB). A lower Quality preset in the "
                 "Insert menu also uses less memory.",
-                "Longshot: out of memory", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+                "Butterfly: out of memory", MB_OK | MB_ICONWARNING | MB_TOPMOST);
     return 0;
 }
 

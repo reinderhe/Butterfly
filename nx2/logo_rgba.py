@@ -11,7 +11,7 @@ import sys
 import zlib
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-SOURCE = os.path.join(ROOT, "assets", "longshot.png")
+SOURCE = os.path.join(ROOT, "assets", "butterfly.png")   # (butterfly: its own logo; assets/longshot.png is Longshot's)
 
 
 def decode(data):

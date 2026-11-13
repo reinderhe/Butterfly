@@ -224,7 +224,7 @@ static int send_activity(Ipc p, long long started) {
     snprintf(version, sizeof version, "%s", hos_version());
     version[strcspn(version, " +")] = 0;   /* ("v2.0.12 (source ...)": the release alone) */
     snprintf(json, sizeof json,
-             "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%u\",\"args\":{\"pid\":%lu,\"activity\":{\"details\":\"Longshot\","
+             "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%u\",\"args\":{\"pid\":%lu,\"activity\":{\"details\":\"Butterfly\","
              "\"state\":\"Longshot %s\",\"timestamps\":{\"start\":%lld},\"assets\":{\"large_image\":\"%s\",\"large_text\":"
              "\"Longshot %s\"}}}}",
              ++nonce, process_id(), version, started, LONGSHOT_DISCORD_IMAGE_DEFAULT, version);

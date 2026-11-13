@@ -80,6 +80,11 @@ set "TEMP=%BASE%\temp"
 set "TMP=%BASE%\temp"
 if not exist "%BASE%\temp" mkdir "%BASE%\temp"
 cd /d "%TOOLS%"
+rem (Butterfly's icon for the exe and its window: the build links work\longshot.res in when it is there, nx2/make_icon.py's)
+for %%W in ("%TOOLS%\work" "%WORK%") do (
+    if not exist "%%~W" mkdir "%%~W"
+    copy /y "%TOOLS%\assets\butterfly.res" "%%~W\longshot.res" >nul
+)
 echo.
 echo Building. This takes 20 to 60 minutes; the PC stays usable. The log: %LOG%
 rem (below normal priority, so the PC stays responsive; LONGSHOT_JOBS=<n> limits the compilers)
@@ -90,7 +95,12 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
-rem 5. diagnostics.bat beside the game, as in E:\Butterfly\game (F9 frame dump, F11 thread dump)
+rem 5. The game as butterfly.exe (Longshot's build names it longshot.exe), and diagnostics.bat beside it, as in
+rem E:\Butterfly\game (F9 frame dump, F11 thread dump)
+if exist "%GAME%\longshot.exe" (
+    move /y "%GAME%\longshot.exe" "%GAME%\butterfly.exe" >nul
+    if errorlevel 1 (echo Naming the game butterfly.exe failed: is it still running? & pause & exit /b 1)
+)
 (
     echo @echo off
     echo cd /d "%%~dp0"
@@ -98,11 +108,11 @@ rem 5. diagnostics.bat beside the game, as in E:\Butterfly\game (F9 frame dump, 
     echo set "RX_VK_DUMP_DIR=%%~dp0dumps"
     echo set "EDEN_NX2_GAME_PUSH_CONSTANTS=1"
     echo rem set "BUTTERFLY_MOTION_AXES=7"
-    echo if exist bin\longshot.exe ^(start "" bin\longshot.exe^) else start "" longshot.exe
+    echo start "" butterfly.exe
 ) > "%GAME%\diagnostics.bat"
 
 echo.
-echo Done. The game is in %GAME%. Start it with diagnostics.bat there, or longshot.exe.
+echo Done. The game is in %GAME%. Start it with diagnostics.bat there, or butterfly.exe.
 echo The first start compiles its shaders again (Longshot keeps its own caches).
 pause
 exit /b 0

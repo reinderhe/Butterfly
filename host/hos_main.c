@@ -1691,7 +1691,7 @@ static void memory_notice(void) {
     int hos_sdl_load(void);
     hos_sdl_load();   /* (host/posix MessageBoxA shows it through the SDL already loaded) */
 #endif
-    MessageBoxA(NULL, text, "Longshot", MB_OK | MB_ICONWARNING);
+    MessageBoxA(NULL, text, "Butterfly", MB_OK | MB_ICONWARNING);
 }
 #endif
 /* (butterfly) per game switches, before anything reads them (the Vulkan layer, the shader translator): Nintendo Switch
@@ -1743,13 +1743,13 @@ static int narrow_paths_ok(int argc, char **argv) {
     if (!quiet) {
         wchar_t text[MAX_PATH * 2 + 640];
         _snwprintf(text, sizeof text / sizeof text[0],
-                   L"Longshot can't open its files in this folder:\n\n%ls\n\n"
+                   L"Butterfly can't open its files in this folder:\n\n%ls\n\n"
                    L"%ls\n\nMove the game folder somewhere with a shorter name of plain letters and digits (for example C:\\Games\\Longshot), "
                    L"or update Windows.",
                    w, GetACP() == CP_UTF8 ? L"The path is too long."
                                           : L"Its name has characters this Windows can only give the game from Windows 10 version 1903 on.");
         text[sizeof text / sizeof text[0] - 1] = 0;
-        MessageBoxW(NULL, text, L"Longshot", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+        MessageBoxW(NULL, text, L"Butterfly", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
     }
     return 0;
 }

@@ -533,7 +533,7 @@ std::string write(const Inputs& in) {
     }
 
     std::string text;
-    text += "Longshot bug report, made by the Insert menu's Bug report on " + when(in.now, "%Y-%m-%d at %H:%M") + ".\n\n";
+    text += "Butterfly (built on Longshot) bug report, made by the Insert menu's Bug report on " + when(in.now, "%Y-%m-%d at %H:%M") + ".\n\n";
     text += std::string("To send it: open ") + kIssues + " and choose Game problem (or the link at the end of this file, which "
             "fills in the answers below), copy the answers below into the fields of the same names, say what happened, and drag "
             "the files of this folder, this one too, into the issue.\n\n";

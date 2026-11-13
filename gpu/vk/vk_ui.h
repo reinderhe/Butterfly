@@ -24,13 +24,16 @@ inline ImU32 alpha(ImU32 c, float k) {
 }
 
 // ---- the palette ----
-constexpr ImU32 kInk = rgba(240, 232, 214), kInkBright = rgba(255, 250, 240), kSoft = rgba(214, 204, 184), kDim = rgba(168, 156, 136),
-                kGold = rgba(222, 152, 40), kGoldHi = rgba(238, 168, 52), kGoldInk = rgba(36, 24, 8), kAccent = rgba(214, 170, 96),
-                kEdge = rgba(122, 98, 64, 150), kCellDark = rgba(30, 25, 19, 246), kCellName = rgba(60, 47, 32, 240),
-                kCellNameSel = rgba(92, 70, 42, 248), kBronze = rgba(84, 64, 38), kColumn = rgba(34, 26, 17, 228),
-                kBannerTop = rgba(184, 146, 96, 246), kBanner = rgba(176, 138, 88, 246), kBannerInk = rgba(46, 30, 12),
-                kBannerEdge = rgba(70, 48, 24), kTabInset = rgba(84, 56, 30, 250), kBox = rgba(36, 28, 19, 248),
-                kBoxEdge = rgba(122, 98, 64, 220), kBar = rgba(22, 17, 11, 232), kListen = rgba(150, 120, 40);
+// (butterfly) Sports Resort's colours in place of Longshot's warm gold and bronze: deep teal panels, a turquoise banner, an
+// orange selection as the game's own buttons (the names stay Longshot's, so its drawing code is unchanged). The same
+// contrast as before: light ink on the dark cells, dark ink on the orange and the banner
+constexpr ImU32 kInk = rgba(234, 246, 244), kInkBright = rgba(255, 255, 255), kSoft = rgba(196, 222, 220), kDim = rgba(146, 180, 180),
+                kGold = rgba(246, 96, 46), kGoldHi = rgba(255, 140, 70), kGoldInk = rgba(38, 14, 4), kAccent = rgba(72, 210, 200),
+                kEdge = rgba(64, 136, 146, 150), kCellDark = rgba(9, 30, 38, 246), kCellName = rgba(18, 56, 66, 240),
+                kCellNameSel = rgba(26, 84, 96, 248), kBronze = rgba(20, 70, 82), kColumn = rgba(8, 32, 40, 228),
+                kBannerTop = rgba(92, 214, 206, 246), kBanner = rgba(48, 182, 186, 246), kBannerInk = rgba(4, 30, 36),
+                kBannerEdge = rgba(10, 74, 82), kTabInset = rgba(12, 62, 72, 250), kBox = rgba(10, 36, 44, 248),
+                kBoxEdge = rgba(64, 136, 146, 220), kBar = rgba(6, 24, 30, 232), kListen = rgba(196, 84, 36);
 constexpr int kDimAlpha = 185;   // (the game behind the menu)
 
 /// The unit: pixels per point. By the window's height and the Menu size (1 Small, 2 Medium, 3 Large; anything else, as the
@@ -164,11 +167,11 @@ inline void flourish(Ctx& c, float x0, float x1, float y, ImU32 col) {
 inline void glow(Ctx& c, ImVec2 a0, ImVec2 b0) {
     const float s = c.s;
     for (int i = 6; i >= 1; i--)
-        c.d->AddRect(a0 - ImVec2(i * 1.5f * s, i * 1.5f * s), b0 + ImVec2(i * 1.5f * s, i * 1.5f * s), rgba(255, 244, 220, 12 + 4 * (6 - i)),
+        c.d->AddRect(a0 - ImVec2(i * 1.5f * s, i * 1.5f * s), b0 + ImVec2(i * 1.5f * s, i * 1.5f * s), rgba(255, 236, 222, 12 + 4 * (6 - i)),
                      2 * s, 2.2f * s);
     c.d->AddRect(a0 - ImVec2(1.5f * s, 1.5f * s), b0 + ImVec2(1.5f * s, 1.5f * s), kInkBright, 2 * s, 3 * s);
 }
-/// A gold fill, lighter at its top
+/// The selection's fill (butterfly: orange, as the game's buttons), lighter at its top
 inline void gold(Ctx& c, ImVec2 a0, ImVec2 b0) { c.d->AddRectFilledMultiColor(a0, b0, kGoldHi, kGoldHi, kGold, kGold); }
 
 // ---- the button prompts: the keys, or a controller's buttons by position (any layout: the dot lit) ----
@@ -181,7 +184,7 @@ struct Prompt {
 /// One glyph at p (its top left; the line px + 10 points high); its width. draw false: measured only
 inline float glyph(Ctx& c, float px, ImVec2 p, const Prompt& pr, bool draw) {
     const float s = c.s, hh = px + 10 * s, my = p.y + hh * 0.5f, kpx = px * 0.84f;
-    const ImU32 cap = kInk, ink = rgba(40, 30, 20), dim = rgba(150, 140, 126);
+    const ImU32 cap = kInk, ink = rgba(10, 34, 40), dim = rgba(130, 160, 160);
     auto key = [&](float x, const char* label) {   // (a key's cap, its label in it)
         const float w = label ? std::max(hh, size_of(c.f.strong, kpx, label).x + 14 * s) : hh;
         if (draw) {
@@ -284,12 +287,12 @@ inline float prompt_bar(Ctx& c, const Prompt* list, int n) {
     prompts(k, ImVec2(c.w - c.safe - pw - 10 * s, py + (ph - kh) * 0.5f), list, n, true);
     return py - 12 * s;
 }
-/// The tan banner across the top, hh pixels high, its dark lower edge
+/// The turquoise banner across the top, hh pixels high, its dark lower edge
 inline void banner(Ctx& c, float hh) {
     const float s = c.s;
     c.d->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(c.w, hh), kBannerTop, kBannerTop, kBanner, kBanner);
     c.d->AddRectFilled(ImVec2(0, hh - 3 * s), ImVec2(c.w, hh), kBannerEdge);
-    c.d->AddLine(ImVec2(0, hh - 4 * s), ImVec2(c.w, hh - 4 * s), rgba(226, 192, 138, 140), std::max(1.0f, s));
+    c.d->AddLine(ImVec2(0, hh - 4 * s), ImVec2(c.w, hh - 4 * s), rgba(170, 240, 234, 140), std::max(1.0f, s));
 }
 /// A box (the help, the restart question): opaque, a fine edge, a soft shadow
 inline void box(Ctx& c, ImVec2 a, ImVec2 b) {
@@ -302,7 +305,7 @@ inline void button(Ctx& c, ImVec2 a0, ImVec2 b0, const char* label, bool sel) {
     const float s = c.s;
     if (sel) gold(c, a0, b0);
     else c.d->AddRectFilled(a0, b0, kCellName);
-    c.d->AddRect(a0 + ImVec2(4 * s, 4 * s), b0 - ImVec2(4 * s, 4 * s), sel ? rgba(36, 24, 8, 60) : rgba(190, 154, 98, 90), 0,
+    c.d->AddRect(a0 + ImVec2(4 * s, 4 * s), b0 - ImVec2(4 * s, 4 * s), sel ? rgba(38, 14, 4, 60) : rgba(110, 196, 200, 90), 0,
                  std::max(1.0f, s));
     c.d->AddRect(a0, b0, kBannerEdge, 0, std::max(1.0f, s));
     ImFont* f = sel ? c.f.strong : c.f.body;

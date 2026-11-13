@@ -100,7 +100,8 @@ class PromptSkipTests(unittest.TestCase):
         return 0
 
     def build(self, packaged=False):
-        env = dict(vars(M), romfs=str(self.romfs), out=str(self.out.parent), launcher="packaged launcher" if packaged else None)
+        env = dict(vars(M), romfs=str(self.romfs), out=str(self.out.parent), launcher="packaged launcher" if packaged else None,
+                   oot_only=True)   # (butterfly: the prompts are made for Ocarina of Time only; this is its build)
         exec(FINISH, env)
 
     def stamp(self):
