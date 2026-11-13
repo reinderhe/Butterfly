@@ -5,10 +5,14 @@ rem Its own folders (tools-longshot, game-longshot, work-longshot), so the Hooks
 rem as it is. The compilers come from E:\Butterfly\tools (made by the Hookshot-based build_ssr.bat) or Hookshot Builder;
 rem the newer ones Longshot builds with are downloaded once (scripts\fetch_tools.py, checked against tools.lock).
 
-rem ---- your settings -------------------------------------------------------------------------------------
-set "NUP=E:\Switch 2 roms\NintendoSwitchSportsResort_v1.1.0.nup"
-set "BASE=E:\Butterfly"
-set "BRANCH=ssr-longshot"
+rem ---- your settings (Butterfly Builder sets these itself; run by hand, these are used) ------------------------
+if not defined NUP set "NUP=E:\Switch 2 roms\NintendoSwitchSportsResort_v1.1.0.nup"
+if not defined BASE set "BASE=E:\Butterfly"
+if not defined BRANCH set "BRANCH=ssr-longshot"
+rem (Compile shaders: all, or most to prepare only the shaders and the pipelines already met)
+if not defined COMPILE set "COMPILE=all"
+rem (BF_PAUSE: Butterfly Builder sets it to "cd ." (a command that does nothing): no "press any key" stops)
+if not defined BF_PAUSE set "BF_PAUSE=pause"
 rem ----------------------------------------------------------------------------------------------------------
 
 set "TOOLS=%BASE%\tools-longshot"
@@ -19,7 +23,7 @@ set "WORK=%BASE%\work-longshot"
 if not exist "%NUP%" (
     echo Can't find your game file: %NUP%
     echo Open this .bat in Notepad and set NUP to the full path of your Sports Resort .nup.
-    pause & exit /b 1
+    %BF_PAUSE% & exit /b 1
 )
 if not exist "%BASE%" mkdir "%BASE%"
 
@@ -31,7 +35,7 @@ if not exist "%TOOLS%\python\python.exe" (
         if exist "%%V\HookshotBuilder\tools\python\python.exe" set "SRC=%%V\HookshotBuilder\tools"
     )
     call :copy_tools
-    if errorlevel 1 (pause & exit /b 1)
+    if errorlevel 1 (%BF_PAUSE% & exit /b 1)
 )
 
 rem 2. Butterfly-on-Longshot's code, fresh from GitHub each time
@@ -41,9 +45,9 @@ set "SRCDIR=%BASE%\src-longshot"
 if exist "%SRCDIR%" rmdir /s /q "%SRCDIR%"
 mkdir "%SRCDIR%"
 powershell -NoProfile -Command "Invoke-WebRequest -UseBasicParsing 'https://github.com/reinderhe/Butterfly/archive/refs/heads/%BRANCH%.zip' -OutFile '%ZIP%'"
-if errorlevel 1 (echo The download failed. & pause & exit /b 1)
+if errorlevel 1 (echo The download failed. & %BF_PAUSE% & exit /b 1)
 tar -xf "%ZIP%" -C "%SRCDIR%"
-if errorlevel 1 (echo Unzipping failed. & pause & exit /b 1)
+if errorlevel 1 (echo Unzipping failed. & %BF_PAUSE% & exit /b 1)
 set "REPO="
 for /d %%D in ("%SRCDIR%\*") do set "REPO=%%D"
 rem (each folder of the code mirrored, so a file the code no longer has does not stay behind and get built; but
@@ -56,18 +60,18 @@ for /d %%D in ("%REPO%\*") do (
     ) else (
         robocopy "%%D" "%TOOLS%\%%~nxD" /MIR /NFL /NDL /NJH /NJS /NP >nul
     )
-    if errorlevel 8 (echo Copying the code failed. & pause & exit /b 1)
+    if errorlevel 8 (echo Copying the code failed. & %BF_PAUSE% & exit /b 1)
 )
 rem (the ready-made libraries a first build_ssr_longshot.bat lost, put back from the Hookshot-based tools)
 if exist "%BASE%\tools\third_party\sdl2\SDL3.dll" if not exist "%TOOLS%\third_party\sdl2\SDL3.dll" (
     robocopy "%BASE%\tools\third_party" "%TOOLS%\third_party" /E /XC /XN /XO /NFL /NDL /NJH /NJS /NP >nul
 )
 robocopy "%REPO%" "%TOOLS%" /NFL /NDL /NJH /NJS /NP >nul
-if errorlevel 8 (echo Copying the code failed. & pause & exit /b 1)
+if errorlevel 8 (echo Copying the code failed. & %BF_PAUSE% & exit /b 1)
 
 rem 3. The newer tools Longshot builds with (llvm-mingw, the CPM packages, wgpu-native): downloaded once, checked
 "%TOOLS%\python\python.exe" -I "%TOOLS%\scripts\fetch_tools.py" "%TOOLS%"
-if errorlevel 1 (echo Fetching Longshot's tools failed. Send Claude what it printed above. & pause & exit /b 1)
+if errorlevel 1 (echo Fetching Longshot's tools failed. Send Claude what it printed above. & %BF_PAUSE% & exit /b 1)
 
 rem 4. The build: the game is unpacked into %GAME%, translated, compiled
 set "RX_CPM=%TOOLS%\cpm"
@@ -89,18 +93,18 @@ echo.
 echo Building. This takes 20 to 60 minutes; the PC stays usable. The log: %LOG%
 rem (below normal priority, so the PC stays responsive; LONGSHOT_JOBS=<n> limits the compilers)
 rem (--compile-shaders all: the preparation builds every pipeline it predicts too, before the title, not in play)
-start "" /belownormal /wait /b "%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --work "%WORK%" --log "%LOG%" --compile-shaders all
+start "" /belownormal /wait /b "%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --work "%WORK%" --log "%LOG%" --compile-shaders %COMPILE%
 if errorlevel 1 (
     echo.
     echo The build stopped. Send Claude the end of %LOG%.
-    pause & exit /b 1
+    %BF_PAUSE% & exit /b 1
 )
 
 rem 5. The game as butterfly.exe (Longshot's build names it longshot.exe), and diagnostics.bat beside it, as in
 rem E:\Butterfly\game (F9 frame dump, F11 thread dump)
 if exist "%GAME%\longshot.exe" (
     move /y "%GAME%\longshot.exe" "%GAME%\butterfly.exe" >nul
-    if errorlevel 1 (echo Naming the game butterfly.exe failed: is it still running? & pause & exit /b 1)
+    if errorlevel 1 (echo Naming the game butterfly.exe failed: is it still running? & %BF_PAUSE% & exit /b 1)
 )
 (
     echo @echo off
@@ -115,7 +119,7 @@ if exist "%GAME%\longshot.exe" (
 echo.
 echo Done. The game is in %GAME%. Start it with diagnostics.bat there, or butterfly.exe.
 echo The first start compiles its shaders again (Longshot keeps its own caches).
-pause
+%BF_PAUSE%
 exit /b 0
 
 :copy_tools
