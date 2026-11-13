@@ -2480,6 +2480,19 @@ bool upload_defer(const Texture& tex) {
     return true;
 }
 }  // namespace
+static bool keep_drawn_finalized() {
+    static const bool on = env_on("RX_VK_KEEP_DRAWN_FINALIZED");
+    return on;
+}
+static bool drawn_only_format(VkFormat f) {   // (formats a game's files do not hold: render targets')
+    switch (f) {
+    case VK_FORMAT_A2B10G10R10_UNORM_PACK32: case VK_FORMAT_A2R10G10B10_UNORM_PACK32: case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+    case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_R32G32B32A32_SFLOAT: case VK_FORMAT_R16G16_SFLOAT:
+        return true;
+    default:
+        return false;
+    }
+}
 Texture* texture_touch(Texture* tex, bool for_sampling) {
     tex->last_frame = frame_no;
     tex->last_value = rec_value;
@@ -2564,6 +2577,25 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     }
     if (tex->uploaded && !gpu_dirty && !texture_dirty(*tex, since, dirty)) return tex;
     const uint32_t gen = memory_generation();
+    // (butterfly) RX_VK_KEEP_DRAWN_FINALIZED=1 (Sports Resort's default): an image the GPU drew in a format only drawing makes
+    // (10-bit, float), finalized by the game and its memory written whole by the CPU since, keeps what the GPU drew. Sports
+    // Resort's blurred picture of the match behind the Rank Up screen is such an image: the CPU's write copies texels that
+    // were in memory on the console, and here are not (the GPU's are only in the image), so the background was noise
+    if (tex->uploaded && tex->gpu_written && tex->released && !gpu_dirty && !tex->only_cleared && keep_drawn_finalized() &&
+        drawn_only_format(tex->format)) {
+        uint64_t bytes = 0;
+        for (const auto& r : dirty) bytes += r.second - r.first;
+        if (bytes * 4 >= tex->guest_size * 3) {   // (most of it: a copy of a picture, not a variable sharing its pages)
+            static int logged;
+            if (logged++ < 40)
+                logf("vk: texture #%u %#llx %ux%u NVN %#x the GPU drew, finalized, its memory written by the CPU (%llu KB): "
+                     "the GPU's picture kept (RX_VK_KEEP_DRAWN_FINALIZED)", tex->id, (unsigned long long)tex->gpu, tex->width,
+                     tex->height, tex->nvn_format, (unsigned long long)(bytes >> 10));
+            tex->release_gen = gen;
+            tex->upload_gen = gen;
+            return tex;
+        }
+    }
     // (storage render targets took last, which the CPU has not written since: nothing to upload, the memory holds
     // nothing the GPU's images did not replace. The game's transient heaps move with the dynamic resolution, and a
     // render target sampled before it is rendered at its new address (the culling reads last frame's shadow map)

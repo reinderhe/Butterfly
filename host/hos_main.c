@@ -1721,6 +1721,11 @@ static void game_switches(void) {
             void nvn_depth_default(int minus_w);   /* host/nvn_native.c */
             nvn_depth_default(0);
         }
+#ifdef _WIN32
+        if (!getenv("RX_VK_KEEP_DRAWN_FINALIZED")) _putenv("RX_VK_KEEP_DRAWN_FINALIZED=1");   /* (the Rank Up screen's background) */
+#else
+        setenv("RX_VK_KEEP_DRAWN_FINALIZED", "1", 0);
+#endif
         hos_account_setup();   /* (the user a Lichii save belongs to, when HOS_ACCOUNT_UID names it) */
         fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",
                 getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") ? getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") : "(unset)");
