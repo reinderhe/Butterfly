@@ -219,8 +219,36 @@ HLE(_ZN2nn2oe25TryPopNotificationMessageEPj) { RET(0); }
 HLE(_ZN2nn2oe22PopNotificationMessageEv) { for (;;) hos_sleep_ns(1000000000LL); }
 
 /* ---- nn::account: one user ------------------------------------------------------------------------------------ */
-static const uint64_t user_uid[2] = {0x0000000000000001ULL, 0x5a3c9e1f0b7d2468ULL};
-HLE(_ZN2nn7account10InitializeEv) {}
+/* (user_uid[0] the Uid's first 8 bytes, [1] its last: the save folder is named %016llx of [1] then of [0], as nn_fs.c's,
+   Lichii's and yuzu's are, so a Lichii profile folder's name, given as HOS_ACCOUNT_UID, is that same user) */
+uint64_t user_uid[2] = {0x0000000000000001ULL, 0x5a3c9e1f0b7d2468ULL};
+void hos_account_setup(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    const char *e = getenv("HOS_ACCOUNT_UID");
+    if (!e) return;
+    char hex[33];
+    int n = 0;
+    for (const char *q = e; *q && n < 33; q++)
+        if (*q != ' ' && *q != '-' && *q != '{' && *q != '}') hex[n++] = *q;
+    if (n != 32) { hos_log("account: HOS_ACCOUNT_UID is not 32 hex digits, ignored"); return; }
+    hex[32] = 0;
+    char a[17], b[17];
+    memcpy(a, hex, 16); a[16] = 0;
+    memcpy(b, hex + 16, 16); b[16] = 0;
+    char *ea, *eb;
+    const unsigned long long hi = strtoull(a, &ea, 16), lo = strtoull(b, &eb, 16);
+    if (*ea || *eb || (!hi && !lo)) { hos_log("account: HOS_ACCOUNT_UID is not 32 hex digits, ignored"); return; }
+    user_uid[0] = lo;
+    user_uid[1] = hi;
+    hos_log("account: the user %016llx%016llx (HOS_ACCOUNT_UID)", hi, lo);
+}
+const char *hos_account_name(void) {
+    const char *e = getenv("HOS_ACCOUNT_NAME");
+    return e && *e ? e : "Player";
+}
+HLE(_ZN2nn7account10InitializeEv) { hos_account_setup(); }
 /* TryOpenPreselectedUser(UserHandle*) -> bool. A handle is three words; ours carries the uid. */
 HLE(_ZN2nn7account22TryOpenPreselectedUserEPNS0_10UserHandleE) {
     G64(ARG(0)) = user_uid[0];
@@ -238,7 +266,10 @@ HLE(_ZN2nn7account9GetUserIdEPNS0_3UidERKNS0_10UserHandleE) {
 /* GetNickname(Nickname*, Uid const&) -> Result: Nickname is char[33] */
 HLE(_ZN2nn7account11GetNicknameEPNS0_8NicknameERKNS0_3UidE) {
     memset(GP(ARG(0)), 0, 33);
-    memcpy(GP(ARG(0)), "Player", 6);
+    const char *name = hos_account_name();
+    size_t len = strlen(name);
+    if (len > 32) len = 32;
+    memcpy(GP(ARG(0)), name, len);
     RET(0);
 }
 HLE(_ZN2nn7account16GetUserExistenceEPbRKNS0_3UidE) {

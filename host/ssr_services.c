@@ -5,8 +5,7 @@
 #include <windows.h>
 #include <string.h>
 
-/* nn_applet.c's user */
-static const uint64_t user_uid[2] = {0x0000000000000001ULL, 0x5a3c9e1f0b7d2468ULL};
+/* (the user: nn_applet.c's user_uid, hos.h) */
 
 /* ---- nn::account ------------------------------------------------------------------------------------------------ */
 /* GetUserCount(int*) -> Result */
@@ -23,6 +22,14 @@ HLE(_ZN2nn7account18ListQualifiedUsersEPiPNS0_3UidEi) {
     }
     if (hos_guest_range(ARG(0), 4)) G32(ARG(0)) = (uint32_t)n;
     RET(0);
+}
+/* ShowUserCreator() -> Result: the system's "add a user" screen (the game's "add character" button opens it). There is no
+   such screen here, so it is cancelled: the game then counts the users (still one) and stays where it was. Answered 0
+   (success, as an unimplemented import is), the game took it that a user was added, looked for them and aborted. */
+#define R_ACCOUNT_CANCELLED 0x67C   /* (an account error: module 124, cancelled by the user) */
+HLE(_ZN2nn7account15ShowUserCreatorEv) {
+    hos_log("account: ShowUserCreator (no add-a-user screen here: cancelled)");
+    RET(R_ACCOUNT_CANCELLED);
 }
 /* LoadProfileImage(unsigned long* size, void*, unsigned long, Uid const&) -> Result: the user has no picture */
 #define R_ACCOUNT_NO_IMAGE 0x3A67C   /* (an account error: module 124) */

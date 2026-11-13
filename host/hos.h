@@ -166,4 +166,9 @@ uint32_t movie_reader_codec(MovieReader *r);   /* the stream's FourCC: 'VP90', '
 uint64_t hos_ticks(void);
 void hos_sleep_ns(int64_t ns);
 int64_t hos_now_ns(void);
+/* ---- account: the console's one user (nn_applet.c). HOS_ACCOUNT_UID (32 hex digits, as its save folder is named) and
+   HOS_ACCOUNT_NAME (its nickname) in the environment or longshot_env.txt choose them; otherwise a fixed uid, "Player". */
+extern uint64_t user_uid[2];
+const char *hos_account_name(void);
+void hos_account_setup(void);   /* (reads HOS_ACCOUNT_UID once: at start, after longshot_env.txt) */
 #endif

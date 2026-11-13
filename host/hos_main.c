@@ -1721,6 +1721,7 @@ static void game_switches(void) {
             void nvn_depth_default(int minus_w);   /* host/nvn_native.c */
             nvn_depth_default(0);
         }
+        hos_account_setup();   /* (the user a Lichii save belongs to, when HOS_ACCOUNT_UID names it) */
         fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",
                 getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") ? getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") : "(unset)");
     }
