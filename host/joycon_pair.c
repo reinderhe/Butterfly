@@ -127,10 +127,41 @@ static BOOL CALLBACK accept_authentication(LPVOID ctx, PBLUETOOTH_AUTHENTICATION
     return TRUE;
 }
 
+/* A Joy-Con Windows already knows, seen by an inquiry and not connected: in pairing mode again (paired with a Switch since,
+   say), or only on its way back, which a bonded Joy-Con is for some seconds after it wakes. Removing the pairing of one on its
+   way back lost it: the right Joy-Con was removed as the game started, wasn't in pairing mode, and Windows had forgotten it.
+   So its pairing is redone only once it has answered three inquiries in a row (some 15 s) without connecting: one in pairing
+   mode stays so, one on its way back has connected by then. */
+#define REPAIR_AFTER 3
+static struct { BLUETOOTH_ADDRESS addr; int seen; } known[8];
+static int known_seen(const BLUETOOTH_ADDRESS *a) {
+    int free_slot = -1;
+    for (int i = 0; i < 8; i++) {
+        if (known[i].seen && known[i].addr.ullLong == a->ullLong) return ++known[i].seen;
+        if (!known[i].seen && free_slot < 0) free_slot = i;
+    }
+    if (free_slot < 0) free_slot = 0;
+    known[free_slot].addr = *a, known[free_slot].seen = 1;
+    return 1;
+}
+static void known_forget_unseen(const BLUETOOTH_ADDRESS *seen, int n) {   /* (not seen by this inquiry: the count starts over) */
+    for (int i = 0; i < 8; i++) {
+        int found = 0;
+        for (int j = 0; j < n && !found; j++) found = known[i].addr.ullLong == seen[j].ullLong;
+        if (!found) known[i].seen = 0;
+    }
+}
+
 static void pair(HANDLE radio, BLUETOOTH_DEVICE_INFO *info) {
     char name[64];
     name_of(info, name, sizeof name);
     if (info->fRemembered) {
+        const int seen = known_seen(&info->Address);
+        if (seen < REPAIR_AFTER) {
+            hos_log("hid: pairing: \"%s\" is known to Windows and not connected yet (%d of %d): left to reconnect", name, seen,
+                    REPAIR_AFTER);
+            return;
+        }
         /* (Windows can't use a controller that reconnects by itself: start over as with a new one) */
         const DWORD removed = bt.RemoveDevice(&info->Address);
         hos_log("hid: pairing: \"%s\": its old pairing removed (result %lu)", name, (unsigned long)removed);
@@ -175,14 +206,20 @@ static void pair_discoverable(void) {
         memset(&info, 0, sizeof info);
         info.dwSize = sizeof info;
         HBLUETOOTH_DEVICE_FIND df = bt.FindFirstDevice(&search, &info);
+        BLUETOOTH_ADDRESS seen[8];
+        int nseen = 0;
         if (df) {
             do {
-                if (is_switch_controller(&info) && !info.fConnected && seen_since(&info, &start)) pair(radio, &info);
+                if (is_switch_controller(&info) && !info.fConnected && seen_since(&info, &start)) {
+                    if (info.fRemembered && nseen < 8) seen[nseen++] = info.Address;
+                    pair(radio, &info);
+                }
                 memset(&info, 0, sizeof info);
                 info.dwSize = sizeof info;
             } while (bt.FindNextDevice(df, &info));
             bt.FindDeviceClose(df);
         }
+        known_forget_unseen(seen, nseen);
         CloseHandle(radio);
     } while (bt.FindNextRadio(rf, &radio));
     bt.FindRadioClose(rf);
