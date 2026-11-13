@@ -245,12 +245,13 @@ static void q_norm(float q[4]) {
     if (n > 0) for (int i = 0; i < 4; i++) q[i] /= n;
     else q[0] = q[1] = q[2] = 0, q[3] = 1;
 }
-/* the turn that takes (0, 0, -1) to the reading a (the tilt alone, no yaw) */
-static void q_from_accel(const float *a, float q[4]) {
+/* the turn that takes (0, 0, flat) to the reading a (the tilt alone, no yaw); flat: the z reading of the Joy-Con lying
+   flat, buttons up, in the fusion's axes (-1, or +1 with z turned around): that pose is no turn */
+static void q_from_accel(const float *a, float flat, float q[4]) {
     const float n = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
     if (n < 1e-3f) { q[0] = q[1] = q[2] = 0, q[3] = 1; return; }
-    /* the Joy-Con's turn R has R^T (0,0,-1) = a/|a|: q is the turn from a/|a| to (0, 0, -1) */
-    const float u[3] = {a[0] / n, a[1] / n, a[2] / n}, v[3] = {0, 0, -1};
+    /* the Joy-Con's turn R has R^T (0,0,flat) = a/|a|: q is the turn from a/|a| to (0, 0, flat) */
+    const float u[3] = {a[0] / n, a[1] / n, a[2] / n}, v[3] = {0, 0, flat};
     const float d = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
     if (d < -0.9999f) { q[0] = 1, q[1] = q[2] = q[3] = 0; return; }
     q[0] = u[1] * v[2] - u[2] * v[1], q[1] = u[2] * v[0] - u[0] * v[2], q[2] = u[0] * v[1] - u[1] * v[0], q[3] = 1 + d;
@@ -301,9 +302,10 @@ static void integrate_one(const HosMotionSample *s, int v) {
     if (an > 0.8f && an < 1.2f) {
         float r[9];
         matrix_of(integ_q, r);
-        const float v[3] = {-r[6], -r[7], -r[8]};   /* the reading lying this way would give: R^T (0, 0, -1) */
+        const float flat = -(float)axes_sign[v][2];
+        const float ref[3] = {flat * r[6], flat * r[7], flat * r[8]};   /* the reading lying this way would give: R^T (0, 0, flat) */
         const float a[3] = {m->accel[0] / an, m->accel[1] / an, m->accel[2] / an};
-        const float e[3] = {a[1] * v[2] - a[2] * v[1], a[2] * v[0] - a[0] * v[2], a[0] * v[1] - a[1] * v[0]};
+        const float e[3] = {a[1] * ref[2] - a[2] * ref[1], a[2] * ref[0] - a[0] * ref[2], a[0] * ref[1] - a[1] * ref[0]};
         const float kp = 1.0f;
         for (int k = 0; k < 3; k++) w[k] += kp * e[k];
     }
@@ -321,7 +323,7 @@ static void integrated(const HosMotionSample *h, int live, int v, float qs[][4])
     if (integ_n < 0 || h[0].n < integ_n) {
         float a0[3], g0[3];
         fusion_axes(&h[live - 1].st, v, a0, g0);
-        q_from_accel(a0, integ_q);   /* (first, or a new motion pad: the tilt from gravity; a gap is
+        q_from_accel(a0, -(float)axes_sign[v][2], integ_q);   /* (first, or a new motion pad: the tilt from gravity; a gap is
                                                           integrated over from what is left of it) */
         integ_n = h[live - 1].n;
         memcpy(integ_ring[integ_n % HOS_MOTION_HISTORY], integ_q, 16);
