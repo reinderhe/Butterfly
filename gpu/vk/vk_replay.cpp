@@ -1251,7 +1251,18 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
             break;
         case NOP_COPY_STRIDE: s.copy_stride = payload<nvn_p_copy_stride>(a, avail).stride; break;
         case NOP_PUSH_CONST: {   // (longshot) compute push constants, kept in the state (vk_bank.cpp serves them from c0)
-            const auto u = payload<nvn_p_push_const>(a, avail);
+            auto u = payload<nvn_p_push_const>(a, avail);
+            if (u.offset & 0x80000000u) {   // (butterfly) graphics ones (bank 24, the translator's 17)
+                u.offset &= ~0x80000000u;
+                if (u.size && u.size <= avail - sizeof u && (uint64_t)u.offset + u.size <= sizeof s.gfx_push) {
+                    const uint8_t* src = a + sizeof u;
+                    const bool same = (uint64_t)u.offset + u.size <= s.gfx_push_n && std::memcmp(s.gfx_push + u.offset, src, u.size) == 0;
+                    std::memcpy(s.gfx_push + u.offset, src, u.size);
+                    s.gfx_push_n = std::max<uint32_t>(s.gfx_push_n, u.offset + u.size);
+                    if (!same) s.bind_gen++;
+                }
+                break;
+            }
             if (u.size && u.size <= avail - sizeof u && (uint64_t)u.offset + u.size <= sizeof s.cs_push) {
                 const uint8_t* src = a + sizeof u;
                 const bool same = (uint64_t)u.offset + u.size <= s.cs_push_n && std::memcmp(s.cs_push + u.offset, src, u.size) == 0;

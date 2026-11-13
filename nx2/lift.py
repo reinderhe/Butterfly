@@ -166,7 +166,8 @@ def main():
         print("ADR / ADRP+ADD code addresses outside the %d unwind-covered functions: %d, %d of them new entries" % (
             len(spans), len(refs), len(new)))
     L = a64_lift.Lifter(img)
-    if a.standalone:   # (longshot) widescreen and ultrawide: C after a few of the game's instructions
+    import game
+    if a.standalone and game.is_oot():   # (longshot) widescreen and ultrawide: C after a few of the game's instructions
         import oot_wide
         oot_wide.install(L, img)
         import oot_fov   # (the gameplay lens, before projection and culling are built)

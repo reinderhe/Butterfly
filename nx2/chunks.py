@@ -512,6 +512,17 @@ def _edit_marks(path):
     return found, lines, st
 
 
+def _edit_groups_only(path):
+    """(butterfly: edit_c for a game other than Ocarina of Time) the page marks of each group of stores alone"""
+    with open(path, encoding="utf-8", newline="") as f:
+        s = f.read()
+    st = collections.Counter()
+    out = s if os.environ.get("A64_MARK_EACH") else a64_lift.mark_groups(s, st)
+    if out != s:
+        whole_write.write_whole(path, out, newline="")
+    return st
+
+
 def _each(fn, items, jobs):
     """fn over items, in order: forked processes (one file each at a time) where there are several, else here. A worker that
     dies (stopped for memory) breaks the pool: the items without a result are done here (a file is rewritten whole or not at
@@ -599,6 +610,13 @@ def edit_c(gen, stats, supported, whole=True, took=None, jobs=None):
     took = took or (lambda what: None)
     jobs = file_jobs() if jobs is None else jobs
     paths = sorted(glob.glob(os.path.join(glob.escape(gen), "code_*.c")))
+    import game
+    if not game.is_oot():   # (butterfly) Ocarina of Time's patches and output-size edits have their places in its code alone
+        for st in _each(_edit_groups_only, paths, jobs):
+            for k, v in st.items():
+                stats[k] = stats.get(k, 0) + v
+        took("page-mark groups")
+        return
     done = _each(_edit_patches, [(p, supported) for p in paths], jobs)
     for _, lines in done:
         if lines:

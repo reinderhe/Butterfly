@@ -1694,6 +1694,31 @@ static void memory_notice(void) {
     MessageBoxA(NULL, text, "Longshot", MB_OK | MB_ICONWARNING);
 }
 #endif
+/* (butterfly) per game switches, before anything reads them (the Vulkan layer, the shader translator): Nintendo Switch
+   Sports Resort pushes its graphics constants itself (nvnCommandBufferPushGraphicsConstants), so the translator keeps the
+   shaders' reads of them rather than a blit's guessed values, and the replay serves them. (An EDEN_ variable: the
+   program cache keeps such programs apart) */
+static void game_switches(void) {
+    fprintf(stderr, "[hos host] game: program id %016llx\n", (unsigned long long)hos_program_id);
+    if (hos_program_id == 0x04008E001F098000ull) {
+#ifdef _WIN32
+        if (!getenv("EDEN_NX2_GAME_PUSH_CONSTANTS")) _putenv("EDEN_NX2_GAME_PUSH_CONSTANTS=1");
+#else
+        setenv("EDEN_NX2_GAME_PUSH_CONSTANTS", "1", 0);
+#endif
+        /* (Joy-Cons one at a time and upright, their motion in their own frame, as Switch Sports holds them: SDL's
+           hints, which it reads from the environment) */
+#ifdef _WIN32
+        if (!getenv("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS")) _putenv("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS=0");
+        if (!getenv("SDL_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS")) _putenv("SDL_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS=1");
+#else
+        setenv("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS", "0", 0);
+        setenv("SDL_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS", "1", 0);
+#endif
+        fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",
+                getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") ? getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") : "(unset)");
+    }
+}
 #ifdef _WIN32
 /* (longshot) On laptops with two GPUs, the drivers run a program on the dedicated one when it exports these (NVIDIA Optimus, AMD
    PowerXpress): without them a laptop could put the game on its integrated GPU, 5 fps (issue 176) */
@@ -1740,6 +1765,7 @@ static int game_main(int argc, char **argv) {
         hos_relaunch_keep_env();
     }
     load_longshot_env();
+    game_switches();
 #endif
     occlusion_switch();
     {
@@ -2057,6 +2083,7 @@ int main(int argc, char **argv) {
     int hos_display_init(void);
     void hos_display_loop(void);
     load_longshot_env();
+    game_switches();
     driver_cache_room();
     driver_cache_folder();
     game_argc = argc, game_argv = argv;

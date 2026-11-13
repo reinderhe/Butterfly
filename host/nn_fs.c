@@ -330,6 +330,72 @@ HLE(_ZN2nn2fs7UnmountEPKc) {
 HLE(_ZN2nn2fs6CommitEPKc) { RET(0); }
 HLE(_ZN2nn2fs26SetPriorityOnCurrentThreadENS0_8PriorityE) {}
 
+/* ---- (butterfly) the rest of what Nintendo Switch Sports Resort mounts. Left to the SDK each opens the file-system
+   proxy over IPC and aborts on the empty reply. ------------------------------------------------------------------ */
+/* IsMounted(char const*) -> bool */
+HLE(_ZN2nn2fs9IsMountedEPKc) {
+    const char *name = gstr(ARG(0));
+    int found = 0;
+    AcquireSRWLockShared(&mount_lock);
+    for (int i = 0; i < nmounts && !found; i++) found = !strcmp(mounts[i].name, name);
+    ReleaseSRWLockShared(&mount_lock);
+    RET(found);
+}
+/* System data (the console's own archives, the Mii models for one) is read from <game folder>\systemdata\<id>, when the
+   build put it there. Without it the size query fails, and the game goes on without that archive. */
+static int system_data_dir(uint64_t id, char *out, size_t cap) {
+    char base[HOS_FS_PATH];
+    snprintf(base, sizeof base, "%s", hos_romfs_dir ? hos_romfs_dir : ".");
+    char *sep = strrchr(base, '\\'), *sep2 = strrchr(base, '/');
+    if (sep2 > sep) sep = sep2;
+    if (sep) *sep = 0;
+    else snprintf(base, sizeof base, ".");
+    snprintf(out, cap, "%s\\systemdata\\%016llx", base, (unsigned long long)id);
+    return GetFileAttributesA(out) != INVALID_FILE_ATTRIBUTES;
+}
+/* QueryMountSystemDataCacheSize(unsigned long*, ncm::SystemDataId) */
+HLE(_ZN2nn2fs29QueryMountSystemDataCacheSizeEPmNS_3ncm12SystemDataIdE) {
+    char dir[HOS_FS_PATH];
+    if (!system_data_dir(ARG(1), dir, sizeof dir)) {
+        hos_log("fs: system data %016llx: not in the game folder (%s); the game goes without it",
+                (unsigned long long)ARG(1), dir);
+        RET(R_TARGET_NOT_FOUND);
+        return;
+    }
+    G64(ARG(0)) = 0x1000;
+    RET(0);
+}
+/* MountSystemData(char const*, ncm::SystemDataId, void*, unsigned long) */
+HLE(_ZN2nn2fs15MountSystemDataEPKcNS_3ncm12SystemDataIdEPvm) {
+    char dir[HOS_FS_PATH];
+    if (!system_data_dir(ARG(1), dir, sizeof dir)) { RET(R_TARGET_NOT_FOUND); return; }
+    RET(mount(gstr(ARG(0)), dir, 0) ? 0 : R_NOT_MOUNTED);
+}
+/* GetRamDiskBufferSize(unsigned long size) -> the buffer MountRamDisk needs: ours lives on disk, so a token page */
+HLE(_ZN2nn2fs20GetRamDiskBufferSizeEm) { RET(0x1000); }
+static void delete_tree(const char *dir);
+/* MountRamDisk(char const*, void*, unsigned long): a folder under the user folder, emptied as it is mounted (a RAM
+   disk starts empty: Sports Resort's second run aborted making a file the first run had left there) */
+HLE(_ZN2nn2fs12MountRamDiskEPKcPvm) {
+    char sub[64], root[HOS_FS_PATH];
+    snprintf(sub, sizeof sub, "ramdisk\\%s", gstr(ARG(0)));
+    for (char *p = sub + 8; *p; p++) if (*p == ':' || *p == '/' || *p == '\\' || *p == '.') *p = '_';
+    snprintf(root, sizeof root, "%s\\%s", hos_user_dir, sub);
+    if (GetFileAttributesA(root) != INVALID_FILE_ATTRIBUTES) delete_tree(root);
+    RET(user_mount(gstr(ARG(0)), sub) ? 0 : R_NOT_MOUNTED);
+}
+/* MountDeviceSaveData(char const*): the console's save, shared by its users */
+HLE(_ZN2nn2fs19MountDeviceSaveDataEPKc) { RET(user_mount(gstr(ARG(0)), "save\\device") ? 0 : R_NOT_MOUNTED); }
+/* EnsureSaveData(account::Uid const&): the save is made on its first mount */
+HLE(_ZN2nn2fs14EnsureSaveDataERKNS_7account3UidE) { RET(0); }
+/* IsSaveDataExisting(account::Uid const&) -> bool */
+HLE(_ZN2nn2fs18IsSaveDataExistingERKNS_7account3UidE) {
+    char root[HOS_FS_PATH];
+    snprintf(root, sizeof root, "%s\\save\\%016llx%016llx", hos_user_dir, (unsigned long long)G64(ARG(0) + 8),
+             (unsigned long long)G64(ARG(0)));
+    RET(GetFileAttributesA(root) != INVALID_FILE_ATTRIBUTES);
+}
+
 /* ---- files ---------------------------------------------------------------------------------------------------- */
 int hos_blank_cached_icon(const char *guest, const char *host);   /* (totk_icon_cache.c: TOTK's fused weapon icons) */
 /* HOS_FS_TRACE=1: every file opened (or not found) is logged */

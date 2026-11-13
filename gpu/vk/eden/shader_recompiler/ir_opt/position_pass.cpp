@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
+
 #include <boost/container/small_vector.hpp>
 
 #include "shader_recompiler/frontend/ir/basic_block.h"
@@ -101,6 +103,12 @@ void PositionPass(Environment& env, IR::Program& program) {
 // dither bias (0x40-0x48) and the integer source rectangle 0,0..W-1,H-1 (0x50-0x5c).
 void BlitConstantsPass(Environment& env, IR::Program& program) {
     if (env.ShaderStage() != Stage::VertexB && env.ShaderStage() != Stage::Fragment) {
+        return;
+    }
+    // (butterfly) a game that pushes these itself (PushGraphicsConstants: Nintendo Switch Sports Resort's post-processing
+    // pushes its own block, laid out otherwise): its reads stand, and the replay serves bank 17 from what it pushed
+    static const bool game_push = std::getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") != nullptr;
+    if (game_push) {
         return;
     }
     // Bank 24 is root table 0, which games may load themselves (3D methods 0x504/0x508; the buffer

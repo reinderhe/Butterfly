@@ -1054,6 +1054,20 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
 static void vibration_send(uint64_t handle, uint64_t value);
 volatile int64_t hos_hid_last_read;
 
+/* (butterfly) NpadAttribute for the style No.1 shows (ssr_hid.c): bit 0 connected, 1 wired, 2 left Joy-Con connected,
+   3 left wired, 4 right connected, 5 right wired. A Joy-Con pair with only bit 0 has neither Joy-Con in it: Sports
+   Resort, which takes only a pair or handheld in play, then had no player to start Prop Plane with */
+uint32_t hos_npad_style(void);
+static uint32_t npad_attributes(void) {
+    switch (hos_npad_style()) {
+    case 1u << 1: return 0x3Fu;           /* handheld: both Joy-Cons, on the console */
+    case 1u << 2: return 0x15u;           /* a Joy-Con pair */
+    case 1u << 3: return 0x05u;           /* a left Joy-Con alone */
+    case 1u << 4: return 0x11u;           /* a right Joy-Con alone */
+    default: return ATTR_CONNECTED;       /* a full key controller */
+    }
+}
+
 /* GetNpadStates(State* out, int count, unsigned int const& npadId): the latest state first */
 static void npad_states(Ctx *c) {
     uint64_t out = ARG(0);
@@ -1118,25 +1132,38 @@ static void npad_states(Ctx *c) {
         G64(e) = (uint64_t)(s - i);
         G64(e + 8) = oc_pad_word(buttons);   /* (while the game waits for a note button, the five are the controls: oc_notes) */
         memcpy(GP(e + 16), stick, 16);
-        G32(e + 32) = connected ? ATTR_CONNECTED : 0;
+        G32(e + 32) = connected ? npad_attributes() : 0;
     }
     RET(count);
 }
-HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadFullKeyStateEiRKj) { npad_states(c); }
-HLE(_ZN2nn3hid13GetNpadStatesEPNS0_17NpadHandheldStateEiRKj) { npad_states(c); }
-HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj) { npad_states(c); }
-HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj) { npad_states(c); }
-HLE(_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj) { npad_states(c); }
+/* (butterfly) the first read of each style, logged */
+static void npad_read_style(Ctx *c, int style, const char *name) {
+    static volatile LONG seen;
+    if (!(InterlockedOr(&seen, 1 << style) & (1 << style)))
+        hos_log("hid: the game reads the %s state of npad %u (lr %#llx)", name, G32(ARG(2)), (unsigned long long)c->x[30]);
+    npad_states(c);
+}
+HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadFullKeyStateEiRKj) { npad_read_style(c, 0, "full key"); }
+HLE(_ZN2nn3hid13GetNpadStatesEPNS0_17NpadHandheldStateEiRKj) { npad_read_style(c, 1, "handheld"); }
+HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj) { npad_read_style(c, 2, "Joy-Con pair"); }
+HLE(_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj) { npad_read_style(c, 3, "left Joy-Con"); }
+HLE(_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj) { npad_read_style(c, 4, "right Joy-Con"); }
 /* GetNpadStyleSet(unsigned int const&) -> BitFlagSet<32, NpadStyleTag> */
-HLE(_ZN2nn3hid15GetNpadStyleSetERKj) { RET(G32(ARG(0)) == NPAD_NO1 ? STYLE_FULLKEY : 0); }
+/* (butterfly) the style the game asks for (ssr_hid.c): a full key controller unless it takes only Joy-Cons */
+uint32_t hos_npad_style(void);
+void hos_npad_set_supported(uint32_t styles);
+HLE(_ZN2nn3hid15GetNpadStyleSetERKj) { RET(G32(ARG(0)) == NPAD_NO1 ? hos_npad_style() : 0); }
 
 HLE(_ZN2nn3hid14InitializeNpadEv) {}
 HLE(_ZN2nn3hid18InitializeKeyboardEv) {}
 HLE(_ZN2nn3hid15InitializeMouseEv) {}
 HLE(_ZN2nn3hid14DisconnectNpadERKj) {}
-HLE(_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE) {}
+HLE(_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE) {
+    static int64_t last = -1;
+    if ((int64_t)ARG(0) != last) last = (int64_t)ARG(0), hos_log("hid: Joy-Con hold type %d (0 upright, 1 sideways)", (int)last);
+}
 HLE(_ZN2nn3hid22SetSupportedNpadIdTypeEPKjm) {}
-HLE(_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {}
+HLE(_ZN2nn3hid24SetSupportedNpadStyleSetENS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) { hos_npad_set_supported((uint32_t)ARG(0)); }
 HLE(_ZN2nn3hid18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE) {}
 
 /* ShowControllerSupport(ControllerSupportResultInfo*, ControllerSupportArg const&) -> Result: one player, No.1 */

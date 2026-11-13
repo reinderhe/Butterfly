@@ -51,6 +51,7 @@ BUILD_ID = "e0f3ccfa"   # (the version the patches, the hot list and the profile
 STARTED = time.time()   # (the build's total time, kept in build_times.json and said as @@times)
 sys.path[:0] = [HERE, os.path.join(ROOT, "third_party", "a64-kit", "tools")]   # (python -I leaves the script folder off)
 import toolchain as _toolchain
+import game as _game
 import disk as _disk
 # (longshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (LONGSHOT_MINGW, or llvm-mingw
 # beside the builder), to run under Proton or copy to a Windows PC
@@ -438,10 +439,15 @@ def check_modules(exefs):
                      "Longshot developers." % (name, head.hex()))
 
 
-def check_supported_build(exefs):
+def check_supported_build(exefs, work=None):
+    """The game this dump is (game.py), remembered in the work folder; stops on a build no game supports"""
     bid = build_id(os.path.join(exefs, "main"))
-    if not bid.startswith(BUILD_ID):
-        fail("This is build %s. Longshot supports build %s." % (bid[:8], BUILD_ID))
+    name = _game.from_build_id(bid)
+    if name is None:
+        fail("This is build %s. Supported builds: %s." % (bid[:8], _game.supported_builds()))
+    if work:
+        _game.remember(work, name)
+    return name
 
 
 def file_progress(verb, clock=time.monotonic):
@@ -604,10 +610,11 @@ def check(a, work):
         shutil.rmtree(probe, ignore_errors=True)
     else:
         bid = build_id(os.path.join(a.exefs, "main"))
-    if bid.startswith(BUILD_ID):
-        say("check", "ok", "This is the version Longshot supports (build %s)." % bid[:8])
+    name = _game.from_build_id(bid)
+    if name:
+        say("check", "ok", "This is %s, the version this build supports (build %s)." % (_game.GAMES[name]["title"], bid[:8]))
     else:
-        say("check", "bad", "This is build %s. Longshot supports build %s." % (bid[:8], BUILD_ID))
+        say("check", "bad", "This is build %s. Supported builds: %s." % (bid[:8], _game.supported_builds()))
 
 
 def visual_studio_environment():
@@ -2199,7 +2206,7 @@ def main(a=None):
             try:
                 run(PY + ["nx2/nup.py", a.nup, "--extract", game])
                 check_modules(staged_exefs)
-                check_supported_build(staged_exefs)
+                check_supported_build(staged_exefs, work)
                 if not os.path.isdir(os.path.join(game, "romfs")):
                     fail("The package did not contain a romfs folder.")
             except (OSError, SystemExit):
@@ -2231,10 +2238,10 @@ def main(a=None):
         link_or_copy(a.romfs, romfs)
         shutil.rmtree(kept, ignore_errors=True)
         shutil.copytree(exefs, kept)
-    check_supported_build(exefs)
+    game_name = check_supported_build(exefs, work)
 
-    # (made once on the development PC: lists of addresses and counts, no game code)
-    for name in ("hot_funcs.txt", "hot_order.txt", "longshot_pieces.prof", "longshot.res"):
+    # (made once on the development PC: lists of addresses and counts, no game code; Ocarina of Time's, so for it alone)
+    for name in (("hot_funcs.txt", "hot_order.txt", "longshot_pieces.prof", "longshot.res") if game_name == "oot" else ("longshot.res",)):
         src = os.path.join(ROOT, "work", name)
         dst = os.path.join(work, name)
         # (copied only when it differs: a compiler still ending from a cancelled build keeps the profile mapped, WinError 1224)
@@ -2242,9 +2249,10 @@ def main(a=None):
             copy_writable(src, dst)
     os.makedirs(os.path.join(work, "image"), exist_ok=True)
     src = os.path.join(ROOT, "work", "image", "chunks.txt")   # (where the lifted code's files begin: addresses)
-    if os.path.exists(src):
+    if os.path.exists(src) and game_name == "oot":
         copy_writable(src, os.path.join(work, "image", "chunks.txt"))
-    env = {"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
+    env = {"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1",
+           _game.ENV: game_name}
     if os.path.exists(os.path.join(work, "hot_funcs.txt")):
         env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")
     if os.path.exists(os.path.join(work, "longshot_pieces.prof")) and profile_readable(os.path.join(work, "longshot_pieces.prof")):

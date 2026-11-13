@@ -583,6 +583,62 @@ static int mix_depth(int i, int guard) {   /* how many sub mixes lie between thi
     return 1 + mix_depth(mixes[i].dest, guard + 1);
 }
 
+/* ---- (butterfly) output streams: Switch 2's nn::audio::OpenOutputStream, PCM the game writes as it goes (Sports
+   Resort's movie player plays its sound through one, and paces its video by how much the stream takes). The SDK's
+   OutputStreamImpl is the system's, not in the game, so the calls are answered here: a ring of the written frames per
+   stream, drained into the final output at the stream's own rate (resampled to 48 kHz), the stream's event signaled
+   as room comes free. Under the renderer's lock. ---------------------------------------------------------------------- */
+#define MAX_STREAMS 4
+typedef struct {
+    int used, started, channels, rate, format;   /* format: nn::audio::SampleFormat, 1 PCM8 2 PCM16 3 PCM24 4 PCM32 5 float */
+    uint64_t event;                              /* the game's SystemEvent */
+    float *ring;                                 /* interleaved, channels x cap frames */
+    int cap, head, fill;                         /* frames: head = the next to play */
+    double pos;                                  /* the fraction of a source frame played */
+    int64_t played, written, underruns;
+} OutStream;
+static OutStream streams[MAX_STREAMS];
+
+static float stream_sample(const OutStream *st, int frame, int ch) {
+    if (frame >= st->fill) frame = st->fill - 1;
+    if (frame < 0) return 0.0f;
+    return st->ring[(size_t)((st->head + frame) % st->cap) * st->channels + ch];
+}
+/* the started streams into the final output (out[0..5][FRAME], nch 2 or 6): a stream's channels go to FL FR FC LFE RL
+   RR in order (mono to both sides); on stereo the rest fold down */
+static void streams_frame(float out[6][FRAME], int nch) {
+    for (int k = 0; k < MAX_STREAMS; k++) {
+        OutStream *st = &streams[k];
+        if (!st->used || !st->started || st->channels <= 0) continue;
+        const double step = (double)st->rate / 48000.0;
+        int consumed = 0;
+        for (int i = 0; i < FRAME; i++) {
+            if (st->fill < 1) { st->underruns++; break; }
+            const int f = (int)st->pos;
+            const float t = (float)(st->pos - f);
+            for (int c = 0; c < st->channels && c < 6; c++) {
+                const float v = stream_sample(st, f, c) * (1.0f - t) + stream_sample(st, f + 1, c) * t;
+                if (st->channels == 1) { out[0][i] += v; out[1][i] += v; continue; }
+                if (nch == 6) { out[c][i] += v; continue; }
+                if (c < 2) out[c][i] += v;
+                else if (c == 2 || c == 3) { out[0][i] += v * 0.7071f; out[1][i] += v * 0.7071f; }
+                else out[c & 1][i] += v * 0.7071f;
+            }
+            st->pos += step;
+            const int whole = (int)st->pos;
+            if (whole > 0) {
+                const int n = whole < st->fill ? whole : st->fill;
+                st->head = (st->head + n) % st->cap;
+                st->fill -= n;
+                st->pos -= whole;
+                consumed += n;
+            }
+        }
+        st->played += consumed;
+        if (st->event && consumed) hos_system_event_signal(st->event);
+    }
+}
+
 static void render_frame(int16_t *pcm, int channels) {   /* 240 frames of the device's 2 or 6 channels */
     for (int m = 0; m < MAX_MIXES; m++)
         if (mixes[m].used) {
@@ -638,6 +694,7 @@ static void render_frame(int16_t *pcm, int channels) {   /* 240 frames of the de
             }
         }
     }
+    streams_frame(out, six ? 6 : 2);   /* (butterfly) */
     const int nch = six ? 6 : 2;
     {   /* HOS_AUDIO_STATS=1: once a second, what plays and where the signal is */
         static int stats = -1, frames;
@@ -2062,3 +2119,154 @@ HLE(_ZN2nn5audio25GetI3dl2ReverbInputOutputEPKNS0_15I3dl2ReverbTypeEPaS4_Pii) {
     }
     if (ARG(3)) G32(ARG(3)) = (uint32_t)n;
 }
+
+/* ---- (butterfly) the output stream API (see "output streams" above) --------------------------------------------- */
+/* OutputStreamType: ours keeps a tag and the stream's index in its first 8 bytes */
+#define STREAM_TAG 0x5354524D00000000ull   /* "STRM" */
+static OutStream *stream_of(uint64_t type) {
+    if (!hos_guest_range(type, 8)) return NULL;
+    const uint64_t v = G64(type);
+    if ((v & 0xFFFFFFFF00000000ull) != STREAM_TAG) return NULL;
+    const uint32_t k = (uint32_t)v;
+    return k < MAX_STREAMS && streams[k].used ? &streams[k] : NULL;
+}
+/* OpenOutputStream(OutputStreamType*, os::SystemEvent*, void* buffer, unsigned long size, AudioDeviceName const&,
+   StreamFormat const& {u32 sample format, i32 channels, i32 sample rate}, int buffer frames, int latency frames)
+   (the overload with OutputStreamFlags after them: the flags are left alone) */
+static void open_stream(Ctx *c) {
+    uint32_t format = 2;
+    int channels = 2, rate = 48000;
+    if (hos_guest_range(ARG(5), 12)) {
+        format = G32(ARG(5));
+        channels = (int)G32(ARG(5) + 4);
+        rate = (int)G32(ARG(5) + 8);
+    }
+    if (channels < 1 || channels > 8) channels = 2;
+    if (rate < 8000 || rate > 192000) rate = 48000;
+    int frames = (int)ARG(6);
+    if (frames < rate / 10) frames = rate / 10;   /* (at least 100 ms of room) */
+    if (frames > rate * 2) frames = rate * 2;
+    au_lock();
+    int k = 0;
+    while (k < MAX_STREAMS && streams[k].used) k++;
+    if (k == MAX_STREAMS) {
+        au_unlock();
+        hos_log("audio: OpenOutputStream: no free stream (%d open)", MAX_STREAMS);
+        RET(0x1A7C9);   /* (an audio error: module 153, "out of resource") */
+        return;
+    }
+    OutStream *st = &streams[k];
+    memset(st, 0, sizeof *st);
+    st->ring = (float *)calloc((size_t)frames * channels, sizeof(float));
+    st->used = st->ring != NULL;
+    st->channels = channels, st->rate = rate, st->format = (int)format, st->cap = frames;
+    st->event = ARG(1);
+    au_unlock();
+    if (st->event) hos_system_event_init(st->event, 1);
+    if (hos_guest_range(ARG(0), 8)) G64(ARG(0)) = STREAM_TAG | (uint32_t)k;
+    hos_log("audio: output stream %d opened: %d Hz, %d channels, sample format %u, room for %d frames (latency %d)", k,
+            rate, channels, format, frames, (int)ARG(7));
+    RET(st->used ? 0 : 0x1A7C9);
+}
+HLE(_ZN2nn5audio16OpenOutputStreamEPNS0_16OutputStreamTypeEPNS_2os11SystemEventEPvmRKNS0_15AudioDeviceNameERKNS0_12StreamFormatEii) {
+    open_stream(c);
+}
+HLE(_ZN2nn5audio16OpenOutputStreamEPNS0_16OutputStreamTypeEPNS_2os11SystemEventEPvmRKNS0_15AudioDeviceNameERKNS0_12StreamFormatEiiNS_4util10BitFlagSetILi32ENS0_16OutputStreamFlagEEE) {
+    open_stream(c);
+}
+HLE(_ZN2nn5audio17StartOutputStreamEPNS0_16OutputStreamTypeE) {
+    au_lock();
+    OutStream *st = stream_of(ARG(0));
+    if (st) st->started = 1;
+    au_unlock();
+    RET(0);
+}
+HLE(_ZN2nn5audio16StopOutputStreamEPNS0_16OutputStreamTypeE) {
+    au_lock();
+    OutStream *st = stream_of(ARG(0));
+    if (st) st->started = 0;
+    au_unlock();
+    RET(0);
+}
+HLE(_ZN2nn5audio17CloseOutputStreamEPNS0_16OutputStreamTypeE) {
+    au_lock();
+    OutStream *st = stream_of(ARG(0));
+    if (st) {
+        hos_log("audio: output stream %d closed: %lld frames written, %lld played, %lld frames short",
+                (int)(st - streams), (long long)st->written, (long long)st->played, (long long)st->underruns);
+        free(st->ring);
+        memset(st, 0, sizeof *st);
+    }
+    au_unlock();
+    if (hos_guest_range(ARG(0), 8)) G64(ARG(0)) = 0;
+}
+/* GetOutputStreamFreeFrameCount(OutputStreamType const*) -> int: frames of room */
+HLE(_ZN2nn5audio29GetOutputStreamFreeFrameCountEPKNS0_16OutputStreamTypeE) {
+    au_lock();
+    const OutStream *st = stream_of(ARG(0));
+    const int n = st ? st->cap - st->fill : 0;
+    au_unlock();
+    RET(n);
+}
+/* WriteOutputStream(OutputStreamType*, void const* data, int frames) -> int: the frames taken (as many as there is
+   room for) */
+HLE(_ZN2nn5audio17WriteOutputStreamEPNS0_16OutputStreamTypeEPKvi) {
+    au_lock();
+    OutStream *st = stream_of(ARG(0));
+    int n = (int)ARG(2);
+    if (!st || n <= 0) { au_unlock(); RET(0); return; }
+    if (n > st->cap - st->fill) n = st->cap - st->fill;
+    const int bps = st->format == 1 ? 1 : st->format == 2 ? 2 : 4;
+    const uint64_t bytes = (uint64_t)n * st->channels * bps;
+    if (!hos_guest_range(ARG(1), bytes)) { au_unlock(); RET(0); return; }
+    const uint8_t *src = (const uint8_t *)GP(ARG(1));
+    for (int f = 0; f < n; f++) {
+        float *dst = &st->ring[(size_t)((st->head + st->fill + f) % st->cap) * st->channels];
+        for (int ch = 0; ch < st->channels; ch++) {
+            const uint8_t *p = src + ((size_t)f * st->channels + ch) * bps;
+            float v;
+            switch (st->format) {
+            case 1: v = (int8_t)p[0] / 128.0f; break;
+            case 2: { int16_t s16; memcpy(&s16, p, 2); v = s16 / 32768.0f; break; }
+            case 3: { int32_t s; memcpy(&s, p, 4); v = (float)(s << 8 >> 8) / 8388608.0f; break; }
+            case 4: { int32_t s; memcpy(&s, p, 4); v = (float)s / 2147483648.0f; break; }
+            default: memcpy(&v, p, 4); if (!(v > -4.0f && v < 4.0f)) v = 0.0f; break;   /* (float; NaN to silence) */
+            }
+            dst[ch] = v;
+        }
+    }
+    st->fill += n;
+    st->written += n;
+    au_unlock();
+    RET(n);
+}
+/* GetOutputStreamState(OutputStreamType const*) -> int: 0 started, 1 stopped (as an AudioOut's) */
+HLE(_ZN2nn5audio20GetOutputStreamStateEPKNS0_16OutputStreamTypeE) {
+    au_lock();
+    const OutStream *st = stream_of(ARG(0));
+    const int started = st && st->started;
+    au_unlock();
+    RET(started ? 0 : 1);
+}
+HLE(_ZN2nn5audio25GetOutputStreamStatisticsEPNS0_16OutputStreamTypeEb) { RET(0); }
+/* The virtual output device: the one output, as the renderer's ("MainAudioOut") */
+HLE(_ZN2nn5audio29GetDefaultVirtualOutputDeviceEPNS0_15AudioDeviceNameE) {
+    if (hos_guest_range(ARG(0), 0x100)) {
+        memset(GP(ARG(0)), 0, 0x100);
+        memcpy(GP(ARG(0)), "MainAudioOut", 12);
+    }
+}
+HLE(_ZN2nn5audio32GetVirtualOutputDevicePropertiesEPNS0_23VirtualDevicePropertiesERKNS0_15AudioDeviceNameE) { RET(0); }
+/* GetAudioDeviceOutputVolume(AudioDeviceName const*) -> float: 1 */
+HLE(_ZN2nn5audio26GetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameE) {
+    const float one = 1.0f;
+    uint32_t bits;
+    memcpy(&bits, &one, 4);
+    c->vreg[0][0] = bits, c->vreg[0][1] = 0;
+}
+/* the output device never changes: the event is made and never signaled */
+HLE(_ZN2nn5audio36AcquireAudioOutputDeviceNotificationEPNS_2os11SystemEventE) {
+    if (ARG(0)) hos_system_event_init(ARG(0), 1);
+    RET(0);
+}
+HLE(_ZN2nn5audio36ReleaseAudioOutputDeviceNotificationEPNS_2os11SystemEventE) {}

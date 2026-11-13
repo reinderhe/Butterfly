@@ -102,6 +102,12 @@ class NxImage:
                 elif r["type"] in ("ABS64", "GLOB_DAT", "JUMP_SLOT"):
                     # S + A for all three (AArch64 ELF ABI; rtld writes the same: symbol address + r_addend)
                     v = self.resolve(r["sym"], bind.get(r["sym"]) == "weak") + r["addend"]
+                elif r["type"] == 1031:
+                    # (butterfly) R_AARCH64_TLSDESC: a descriptor of two words, the resolver the code calls and its argument.
+                    # Only Switch Sports Resort's TensorRT module (subsdk4, the camera's inference) has one; the resolver is a
+                    # trampoline, so a call reaches the runtime's unresolved-import handling instead of a null address
+                    struct.pack_into("<Q", self.mem, at + 8, r["addend"] & 0xFFFFFFFFFFFFFFFF)
+                    v = self.trampoline("__a64_tlsdesc_resolver")
                 else:
                     raise SystemExit(f"{m.name}: relocation type {r['type']} at {r['offset']:#x} not supported")
                 struct.pack_into("<Q", self.mem, at, v & 0xFFFFFFFFFFFFFFFF)

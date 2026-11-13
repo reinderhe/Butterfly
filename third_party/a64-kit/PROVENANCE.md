@@ -28,3 +28,4 @@ Licensing: `lift/suyu/arm64_to_c.h` is suyu's (GPL-2.0-or-later, texts in `lift/
 generated runtime and all lifted C are GPL. See `NOTICE.TOTKPort.md`.
 
 tree-sha256: 9e8b8a6500f0b41bd18a55c36d49ab7cc9f5dfd05beff952287acd18a01dacbd
+(butterfly) `hos/nx_image.py` handles R_AARCH64_TLSDESC (type 1031): Switch Sports Resort's TensorRT module has one.
