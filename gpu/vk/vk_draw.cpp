@@ -2593,6 +2593,17 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         c.prog = (const Program*)1, c.at = at, c.buf = cur->stream, c.size = n, c.bytes = tmp;
         return {cur->stream, at, n};
     }
+    // (butterfly) bank 24 (the translator's 17) for a graphics stage: the game's PushGraphicsConstants, when it pushes them
+    // (EDEN_NX2_GAME_PUSH_CONSTANTS: the translator then keeps the reads, BlitConstantsPass)
+    static const bool game_push = getenv("EDEN_NX2_GAME_PUSH_CONSTANTS") != nullptr;
+    if (index == 17 && game_push && st.nvn_stage != 5) {
+        const uint32_t n = std::clamp<uint32_t>((used + 15) & ~15u, 16, (uint32_t)sizeof s.gfx_push);
+        const uint64_t at = stream_alloc(n, align);
+        if (at == UINT64_MAX) return bi;
+        std::memset(cur->mapped + at, 0, n);
+        std::memcpy(cur->mapped + at, s.gfx_push, std::min(n, s.gfx_push_n));
+        return {cur->stream, at, n};
+    }
     if (index == 1) {
         FINE_SCOPE(FT_C1);
         FINE_N(FC_C1_CALLS, 1);

@@ -1603,10 +1603,24 @@ static void driver_cache_room(void) {
     setenv("__GL_SHADER_DISK_CACHE_SIZE", "10737418240", 0);   /* (10 GiB, bytes) */
     setenv("MESA_SHADER_CACHE_MAX_SIZE", "10G", 0);
 }
+/* (butterfly) per game switches, before anything reads them (the Vulkan layer, the shader translator): Nintendo Switch
+   Sports Resort pushes its graphics constants itself (nvnCommandBufferPushGraphicsConstants), so the translator keeps the
+   shaders' reads of them rather than a blit's guessed values, and the replay serves them. (An EDEN_ variable: the
+   program cache keeps such programs apart) */
+static void game_switches(void) {
+    if (hos_program_id == 0x04008E001F098000ull) {
+#ifdef _WIN32
+        if (!getenv("EDEN_NX2_GAME_PUSH_CONSTANTS")) _putenv("EDEN_NX2_GAME_PUSH_CONSTANTS=1");
+#else
+        setenv("EDEN_NX2_GAME_PUSH_CONSTANTS", "1", 0);
+#endif
+    }
+}
 int main(int argc, char **argv) {
     int hos_display_init(void);
     void hos_display_loop(void);
     load_hookshot_env();
+    game_switches();
     driver_cache_room();
     game_argc = argc, game_argv = argv;
     int prepare_shaders = 0;

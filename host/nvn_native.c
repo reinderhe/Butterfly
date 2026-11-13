@@ -1739,6 +1739,24 @@ NV(nvnCommandBufferPushComputeConstants) {
     memcpy(p + 8, &u, sizeof u);
     memcpy(p + 8 + sizeof u, PN(4, n), n);
 }
+/* (butterfly) nvnCommandBufferPushGraphicsConstants(cmdbuf, int ?, offset, size, const void* data): graphics push
+   constants, which NVN2 graphics programs read from constant bank 24 (the translator's bank 17). Nintendo Switch Sports
+   Resort's post-processing pushes 0x6c bytes (its targets' texel size, UV rectangles...) into a command buffer it
+   records once and submits every frame. Recorded as the compute ones, the offset tagged 0x80000000 */
+NV(nvnCommandBufferPushGraphicsConstants) {
+    const uint64_t off = U64(2), n = U32(3);
+    if (!P(4) || !n || n > 0x400 || off > 0x400) return;
+    nvn_cmd *o = CB(P(0));
+    const uint32_t sz = (uint32_t)(8 + sizeof(nvn_p_push_const) + n);
+    uint8_t *p = cmd_alloc(o, sz);
+    put_hdr(p, NOP_PUSH_CONST, (sz + 7) & ~7u);
+    nvn_p_push_const u = {(uint32_t)off | 0x80000000u, (uint32_t)n};
+    memcpy(p + 8, &u, sizeof u);
+    memcpy(p + 8 + sizeof u, PN(4, n), n);
+    static volatile LONG logged;
+    if (InterlockedIncrement(&logged) <= 4)
+        hos_log("nvn: PushGraphicsConstants: %u bytes at %#llx (stage %u)", (unsigned)n, (unsigned long long)off, U32(1));
+}
 /* (hookshot) nvnQueueWaitSync(queue, sync): the queue's later work waits on the GPU for the sync's fence. Every
    NVN queue replays in one stream in submit order, so a fence submitted before this already came first; a sync not
    fenced yet (a wait on a fence another queue submits later) cannot be honored that way and is logged. */
@@ -2904,6 +2922,7 @@ static const nvn_impl impls[] = {
     {"nvnCommandBufferWaitSync", n_nvnCommandBufferWaitSync},
     {"nvnQueueWaitSync", n_nvnQueueWaitSync},
     {"nvnCommandBufferPushComputeConstants", n_nvnCommandBufferPushComputeConstants},
+    {"nvnCommandBufferPushGraphicsConstants", n_nvnCommandBufferPushGraphicsConstants},
     {"nvnCommandBufferResetCounter", n_nvnCommandBufferResetCounter},
     {"nvnCommandBufferReportCounter", n_nvnCommandBufferReportCounter},
     {"nvnCommandBufferCopyBufferToBuffer", n_nvnCommandBufferCopyBufferToBuffer},

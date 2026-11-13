@@ -44,6 +44,8 @@ struct NvnState {
     int64_t copy_stride = 0;
     uint8_t cs_push[0x400]{};   // (hookshot) compute push constants (PushComputeConstants), c0 from 0x10
     uint32_t cs_push_n = 0;
+    uint8_t gfx_push[0x400]{};  // (butterfly) graphics push constants (PushGraphicsConstants): bank 24, the translator's 17
+    uint32_t gfx_push_n = 0;
     uint32_t grid[3]{};          // the dispatch being made (compute programs read it from c0)
     uint64_t samples_passed = 0;
 };
