@@ -81,6 +81,9 @@ HLE(_ZN2nn3hid22InitializeSensorFusionEPvm) { RET(0); }
 HLE(_ZN2nn3hid20FinalizeSensorFusionEv) { fusion_enabled = 0; }
 /* GetSensorFusionHandles(SensorFusionHandle*, int, unsigned int const& npad, BitFlagSet styles) -> int: one, No.1's */
 HLE(_ZN2nn3hid22GetSensorFusionHandlesEPNS0_18SensorFusionHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {
+    static int logged;
+    if (logged++ < 4) hos_log("hid: sensor fusion handles asked for: npad %u, %d wanted, styles %#x", G32(ARG(2)), (int)ARG(1),
+                              (uint32_t)ARG(3));
     if ((int)ARG(1) < 1 || G32(ARG(2)) != NPAD_NO1) { RET(0); return; }
     G32(ARG(0)) = FUSION_HANDLE;
     RET(1);
