@@ -60,21 +60,6 @@ HLE(_ZN2nn3hid28SetNpadJoyAssignmentModeDualERKj) { set_single(G32(ARG(0)), 0); 
 HLE(_ZN2nn3hid18SwapNpadAssignmentERKjS2_) { RET(0); }
 HLE(_ZN2nn3hid23MergeSingleJoyAsDualJoyERKjS2_) { RET(0); }
 
-/* (diagnostic) each place the game calls a motion function from, once: which code reads the motion when */
-static void hid_seen(Ctx *c, const char *fn, uint32_t handle) {
-    static SRWLOCK lock = SRWLOCK_INIT;
-    static struct { const char *fn; uint64_t lr; } seen[48];
-    static int n;
-    const uint64_t lr = c->x[30];
-    AcquireSRWLockExclusive(&lock);
-    int i = 0;
-    while (i < n && !(seen[i].fn == fn && seen[i].lr == lr)) i++;
-    const int fresh = i == n && n < 48;
-    if (fresh) seen[n].fn = fn, seen[n].lr = lr, n++;
-    ReleaseSRWLockExclusive(&lock);
-    if (fresh) hos_log("hid: %s (handle %#x) called from lr %#llx", fn, handle, (unsigned long long)lr);
-}
-
 /* ---- six-axis extras ------------------------------------------------------------------------------------------- */
 /* IsSixAxisSensorAtRest(handle) -> bool: the motion pad lying still (pad_sdl.c's filter). Switch Sports' calibration
    asks for the Joy-Con laid on a table and waits for this */
@@ -83,15 +68,9 @@ HLE(_ZN2nn3hid21IsSixAxisSensorAtRestERKNS0_19SixAxisSensorHandleE) {
     float st[3];
     const int still = hos_sdl_motion_still(st);
     static int was = -1;
-    static ULONGLONG said;
-    const ULONGLONG now = GetTickCount64();
-    const uint32_t handle = hos_guest_range(ARG(0), 4) ? G32(ARG(0)) : 0;
-    hid_seen(c, "IsSixAxisSensorAtRest", handle);
-    /* (the change, and every 2 s while it is asked: the sensors' noise, to set HOS_MOTION_REST_* from a real Joy-Con) */
-    if (still != was || now - said >= 2000) {
-        hos_log("hid: at rest? %s (handle %#x; gyro spread %.4f rad/s, accel spread %.4f G, |accel| %.3f G)",
-                still ? "yes" : "no", handle, st[0], st[1], st[2]);
-        was = still, said = now;
+    if (still != was) {   /* (the change, with the sensors' noise then) */
+        hos_log("hid: at rest: %s (gyro spread %.4f rad/s, accel spread %.4f G)", still ? "yes" : "no", st[0], st[1]);
+        was = still;
     }
     RET(still);
 }
@@ -127,7 +106,6 @@ HLE(_ZN2nn3hid22GetSensorFusionHandlesEPNS0_18SensorFusionHandleEiRKjNS_4util10B
 }
 HLE(_ZN2nn3hid18EnableSensorFusionENS0_18SensorFusionHandleEPvm) {
     const int k = fusion_slot((uint32_t)ARG(0));
-    hid_seen(c, "EnableSensorFusion", (uint32_t)ARG(0));
     if (k < 0) { RET(0); return; }
     if (!fusion_on[k]) hos_log("hid: sensor fusion on for the %s Joy-Con (the orientation from the motion controls)", k ? "right" : "left");
     fusion_on[k] = 1;
@@ -135,14 +113,12 @@ HLE(_ZN2nn3hid18EnableSensorFusionENS0_18SensorFusionHandleEPvm) {
 }
 HLE(_ZN2nn3hid19DisableSensorFusionENS0_18SensorFusionHandleE) {
     const int k = fusion_slot((uint32_t)ARG(0));
-    hid_seen(c, "DisableSensorFusion", (uint32_t)ARG(0));
     if (k >= 0 && fusion_on[k]) hos_log("hid: sensor fusion off for the %s Joy-Con", k ? "right" : "left");
     if (k >= 0) fusion_on[k] = 0;
     RET(0);
 }
 HLE(_ZN2nn3hid21IsSensorFusionEnabledENS0_18SensorFusionHandleE) {
     const int k = fusion_slot((uint32_t)ARG(0));
-    hid_seen(c, "IsSensorFusionEnabled", (uint32_t)ARG(0));
     RET(k >= 0 && fusion_on[k] ? 1 : 0);
 }
 HLE(_ZN2nn3hid18UpdateSensorFusionENS0_18SensorFusionHandleE) { RET(0); }
@@ -261,7 +237,7 @@ static void q_from_accel(const float *a, float flat, float q[4]) {
    right): each axis kept or turned around. The default turns all three around (7, with the orientation handed out the other way round, below: the turns of none
    turned, 1, with gravity read as the calibration accepts it); 6 turns z around: with the six-axis state's axes the calibrated aim had
    pitch and yaw backwards and the calibration's gravity check failed; with x and z turned around (0) all was right but the
-   roll (the plane's bank), mirrored. F7 in the game tries the next of the eight (logged), BUTTERFLY_MOTION_AXES=0..7 starts at one. An axis turned
+   roll (the plane's bank), mirrored. BUTTERFLY_MOTION_AXES=0..7 (the environment) takes another. An axis turned
    around turns the acceleration's part on it; the angular velocity, an axial vector, turns with det(T) T. */
 static const signed char axes_sign[8][3] = {{-1, 1, -1}, {1, 1, 1}, {1, -1, 1}, {-1, -1, 1},
                                              {1, -1, -1}, {-1, 1, 1}, {1, 1, -1}, {-1, -1, -1}};
@@ -269,40 +245,24 @@ static volatile int axes_pick = -1;
 static int64_t integ_n = -1;   /* the newest reading integrated (its own count) */
 /* The orientation handed out the other way round (world to Joy-Con, the conjugate): with all axes turned around (variant
    7) that gives the game its pitch, pointing and bank all the right way (with z turned around (6) the plane was right
-   but table tennis's pointing mirrored; with x and z (0), the bank). F8 turns it off and on, BUTTERFLY_MOTION_CONJ=0
-   starts off. */
+   but table tennis's pointing mirrored; with x and z (0), the bank). BUTTERFLY_MOTION_CONJ=0 (the environment) hands it
+   out Joy-Con to world. (Found with F7 and F8 trying them in the game, since taken out: a key pressed by chance turned
+   the controls around.) */
 static volatile int conj_out = -1;
 static int motion_conj(void) {
-    static SHORT was;
     if (conj_out < 0) {
         const char *e = getenv("BUTTERFLY_MOTION_CONJ");
         conj_out = !(e && *e == '0');
-        hos_log("hid: sensor fusion orientation handed out %s (F8 turns it around)", conj_out ? "world to Joy-Con" : "Joy-Con to world");
+        if (e && *e) hos_log("hid: sensor fusion orientation handed out %s (BUTTERFLY_MOTION_CONJ)", conj_out ? "world to Joy-Con" : "Joy-Con to world");
     }
-    const SHORT now = GetAsyncKeyState(VK_F8) & 0x8000 ? 1 : 0;
-    if (now && !was) {
-        conj_out = !conj_out;
-        hos_log("hid: sensor fusion orientation handed out %s (F8 turns it around)", conj_out ? "world to Joy-Con" : "Joy-Con to world");
-    }
-    was = now;
     return conj_out;
 }
 static int motion_axes(void) {
-    static SHORT was;
     if (axes_pick < 0) {
         const char *e = getenv("BUTTERFLY_MOTION_AXES");
         axes_pick = e && *e >= '0' && *e <= '7' ? *e - '0' : 7;
-        hos_log("hid: sensor fusion axes: variant %d (x %+d, y %+d, z %+d; F7 tries the next)", axes_pick,
-                axes_sign[axes_pick][0], axes_sign[axes_pick][1], axes_sign[axes_pick][2]);
+        if (e && *e) hos_log("hid: sensor fusion axes: variant %d (BUTTERFLY_MOTION_AXES)", axes_pick);
     }
-    const SHORT now = GetAsyncKeyState(VK_F7) & 0x8000 ? 1 : 0;
-    if (now && !was) {
-        axes_pick = (axes_pick + 1) & 7;
-        integ_n = -1;   /* (the orientation starts again from gravity) */
-        hos_log("hid: sensor fusion axes: variant %d (x %+d, y %+d, z %+d; F7 tries the next)", axes_pick,
-                axes_sign[axes_pick][0], axes_sign[axes_pick][1], axes_sign[axes_pick][2]);
-    }
-    was = now;
     return axes_pick;
 }
 /* a reading's acceleration (G) and angular velocity (turns a second) in the fusion's axes */
@@ -363,7 +323,6 @@ static void integrated(const HosMotionSample *h, int live, int v, float qs[][4])
 }
 /* ResetSensorFusionYaw(handle): the way the Joy-Con points now is straight ahead */
 HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
-    hid_seen(c, "ResetSensorFusionYaw", (uint32_t)ARG(0));
     int hos_sdl_motion_history(HosMotionSample *out, int max);   /* pad_sdl.c */
     HosMotionSample h[1];
     if (hos_sdl_motion_history(h, 1) == 1) {
@@ -385,7 +344,6 @@ HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
 }
 /* GetSensorFusionOrientations(SensorFusionOrientation* out, int max, SensorFusionHandle) -> int: newest first */
 HLE(_ZN2nn3hid27GetSensorFusionOrientationsEPNS0_23SensorFusionOrientationEiNS0_18SensorFusionHandleE) {
-    hid_seen(c, "GetSensorFusionOrientations", (uint32_t)ARG(2));
     const uint64_t out = ARG(0);
     const int max = (int)ARG(1) < 1 ? 0 : (int)ARG(1) > HOS_MOTION_HISTORY ? HOS_MOTION_HISTORY : (int)ARG(1);
     if (!max || !hos_guest_range(out, (uint64_t)max * ENTRY)) { RET(0); return; }

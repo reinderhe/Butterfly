@@ -2457,10 +2457,25 @@ def main(a=None):
     place_ngx_runtime(out)
     if fsr_wanted(a, out) and getattr(a, "fetch_fsr_runtime", False):
         place_fsr_runtime(out)
+    oot_only = _game.is_oot(work)   # (butterfly) the four below read Ocarina of Time's files or ship its recorded lists
+    if not oot_only:
+        # another game (Sports Resort): its shaders compile as it plays, it shows its own button icons, and the shipped
+        # pipeline lists (recorded from Ocarina of Time) would be built before its title for nothing. What an earlier
+        # build put in the folder goes (but longshot_pipelines.bin: the game's own cache grows in it as it is played)
+        for n in ("longshot_shaders.bin", "longshot_pipeline_states_shipped.bin"):
+            try:
+                os.remove(os.path.join(out, n))
+            except OSError:
+                pass
+        shutil.rmtree(os.path.join(out, "prompts"), ignore_errors=True)
+        print("the shader list, the other controllers' button prompts and the shipped pipeline lists: Ocarina of Time's, "
+              "not made for %s" % _game.GAMES[_game.current(work)]["title"], flush=True)
     # every shader of the game, for its first start to translate (gpu/vk/vk_shader.cpp seed_open). Without it the game still runs, compiling them
     # as it meets them: not worth stopping a finished build for
     # (made again only when the game's shader files, the census or the list itself changed: 4 s and 514 MB written at every update)
-    if shader_list_current(work, romfs, os.path.join(out, "longshot_shaders.bin")):
+    if not oot_only:
+        pass
+    elif shader_list_current(work, romfs, os.path.join(out, "longshot_shaders.bin")):
         print("the shader list is the one the last build made from the same files: not made again", flush=True)
     elif run(shader_census_cmd(romfs, os.path.join(out, "longshot_shaders.bin")), check=False, output=sys.stderr):
         print("the shader list was not made: the game will compile its shaders as it plays", flush=True)
@@ -2469,7 +2484,9 @@ def main(a=None):
     # (longshot) the button prompts of other controllers (host/prompts.c): the game's icon font redrawn per controller, with fontTools.
     # Without it the game shows its own icons
     prompts = os.path.join(out, "prompts")
-    if importlib.util.find_spec("fontTools") is None:
+    if not oot_only:
+        pass
+    elif importlib.util.find_spec("fontTools") is None:
         shutil.rmtree(prompts, ignore_errors=True)
         print("the button prompts of other controllers were not made (no fontTools): the game shows its own", flush=True)
     elif run(PY + [os.path.join(HERE, "prompt_assets.py"), "--romfs", romfs, "--out", prompts] +
@@ -2479,8 +2496,9 @@ def main(a=None):
     icon = os.path.join(ROOT, "assets", "longshot.png")
     if LINUX and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c)
         copy_writable(icon, os.path.join(out, "longshot.png"))   # (a second build overwrites the first's)
-    seed_pipelines(out)
-    ship_state_list(out)
+    if oot_only:
+        seed_pipelines(out)
+        ship_state_list(out)
     language = os.path.join(out, "language.txt")   # (the same text as host/nn_applet.c writes)
     with open(language, "w", encoding="utf-8", newline="\n") as f:
         f.write("# The game's language. Change the line below to one of the codes listed here, save, and start the game again.\n\n%s\n\n" % a.language)

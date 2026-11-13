@@ -90,7 +90,7 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
-rem 5. diagnostics.bat beside the game, as in E:\Butterfly\game (F9 frame dump, F11 thread dump; F7/F8 the motion axes)
+rem 5. diagnostics.bat beside the game, as in E:\Butterfly\game (F9 frame dump, F11 thread dump)
 (
     echo @echo off
     echo cd /d "%%~dp0"
