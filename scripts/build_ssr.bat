@@ -88,7 +88,8 @@ for %%W in ("%TOOLS%\work" "%WORK%") do (
 echo.
 echo Building. This takes 20 to 60 minutes; the PC stays usable. The log: %LOG%
 rem (below normal priority, so the PC stays responsive; LONGSHOT_JOBS=<n> limits the compilers)
-start "" /belownormal /wait /b "%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --work "%WORK%" --log "%LOG%"
+rem (--compile-shaders all: the preparation builds every pipeline it predicts too, before the title, not in play)
+start "" /belownormal /wait /b "%TOOLS%\python\python.exe" -I nx2\make_game.py --nup "%NUP%" --out "%GAME%" --work "%WORK%" --log "%LOG%" --compile-shaders all
 if errorlevel 1 (
     echo.
     echo The build stopped. Send Claude the end of %LOG%.
