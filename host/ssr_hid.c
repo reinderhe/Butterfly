@@ -15,6 +15,7 @@
 #include "hos_motion.h"
 #include <windows.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define NPAD_NO1 0
@@ -178,12 +179,36 @@ static void quat_mul(const float a[4], const float b[4], float o[4]) {
     o[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
     o[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
 }
-/* the orientation handed out: the motion's, turned about the world's up (z) by the yaw reset */
-static void fused(const HosMotionState *m, float q[4]) {
+/* The Joy-Con's own axes as the Switch 2's fusion has them: the motion filter's turned half a turn about one of its axes.
+   Without it the game's calibrated aim had both pitch and yaw backwards (roll right), a half turn about the long axis (y).
+   BUTTERFLY_MOTION_FLIP=x, y, z or none (in diagnostics.bat or the environment) tries another, with no rebuild. */
+static const float *device_flip(void) {
+    static const float flips[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};   /* x, y, z, none */
+    static int k = -1;
+    if (k < 0) {
+        const char *e = getenv("BUTTERFLY_MOTION_FLIP");
+        int pick = 1;
+        if (e && (*e == 'x' || *e == 'X')) pick = 0;
+        else if (e && (*e == 'z' || *e == 'Z')) pick = 2;
+        else if (e && (*e == 'n' || *e == 'N' || *e == '0')) pick = 3;
+        hos_log("hid: sensor fusion: the Joy-Con turned half a turn about %s (BUTTERFLY_MOTION_FLIP)",
+                pick == 0 ? "x" : pick == 1 ? "y" : pick == 2 ? "z" : "no axis");
+        k = pick;
+    }
+    return flips[k];
+}
+/* the motion's orientation in the fusion's Joy-Con axes (before the yaw reset) */
+static void device_quat(const float *direction, float q[4]) {
     float raw[4];
-    quat_of(m->direction, raw);
+    quat_of(direction, raw);
+    quat_mul(raw, device_flip(), q);
+}
+/* the orientation handed out: that, turned about the world's up (z) by the yaw reset */
+static void fused(const HosMotionState *m, float q[4]) {
+    float d[4];
+    device_quat(m->direction, d);
     AcquireSRWLockShared(&fusion_lock);
-    quat_mul(yaw_fix, raw, q);
+    quat_mul(yaw_fix, d, q);
     ReleaseSRWLockShared(&fusion_lock);
 }
 /* ResetSensorFusionYaw(handle): the way the Joy-Con points now is straight ahead */
@@ -192,7 +217,9 @@ HLE(_ZN2nn3hid20ResetSensorFusionYawENS0_18SensorFusionHandleE) {
     int hos_sdl_motion_history(HosMotionSample *out, int max);   /* pad_sdl.c */
     HosMotionSample h[1];
     if (hos_sdl_motion_history(h, 1) == 1) {
-        const float *m = h[0].st.direction;
+        float d[4], m[9];
+        device_quat(h[0].st.direction, d);
+        matrix_of(d, m);
         const float yaw = atan2f(m[3], m[0]);   /* (the Joy-Con's x axis in the world: column 0) */
         AcquireSRWLockExclusive(&fusion_lock);
         yaw_fix[0] = yaw_fix[1] = 0, yaw_fix[2] = sinf(-yaw / 2), yaw_fix[3] = cosf(-yaw / 2);
