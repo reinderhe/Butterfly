@@ -106,6 +106,8 @@ void hos_window_closed_exit(void) {
     const int again = relaunch_asked != 0;
     hos_log(again ? "display: window closed for a restart (the Insert menu's Restart now)" : "display: window closed, exiting");
     hos_log_flush();
+    void hos_joycon_power_off(void);   /* (butterfly) host/joycon_pair.c: the Switch controllers off, but for a restart */
+    if (!again) hos_joycon_power_off();
     if (again) relaunch();
     ExitProcess(0);
 }

@@ -373,6 +373,10 @@ void a64_svc(Ctx *c, uint32_t imm) {
     case 0x07:   /* ExitProcess */
         hos_log("svcExitProcess");
         hos_log_flush();
+        {
+            void hos_joycon_power_off(void);   /* (butterfly) host/joycon_pair.c */
+            hos_joycon_power_off();
+        }
         ExitProcess(0);
         return;
     case 0x0C: { /* GetThreadPriority(-, handle) -> (result, priority) */

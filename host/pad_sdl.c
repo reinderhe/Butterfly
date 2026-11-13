@@ -525,6 +525,8 @@ int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {
         }
 #ifdef _WIN32
         CreateThread(NULL, 0, pad_main, NULL, 0, NULL);
+        void hos_joycon_pair_start(void);   /* (butterfly) host/joycon_pair.c */
+        hos_joycon_pair_start();
 #else
         if (hos_display_owns_sdl())
             InterlockedExchange(&pads_loaded, 1);   /* (the window's thread polls: hos_sdl_pads_pump) */
@@ -577,6 +579,39 @@ int hos_sdl_motion_calibrated(void) {
     if (now) calibrated = 1, hos_log("hid: the Joy-Con's motion sensors are calibrated (it lay at rest)");
     return now;
 }
+/* (butterfly, host/joycon_pair.c) the Switch controllers open: left and right Joy-Cons (a pair counts as both) and
+   Pro Controllers */
+void hos_sdl_switch_pads(int *left, int *right, int *pro) {
+    *left = *right = *pro = 0;
+    AcquireSRWLockShared(&state_lock);
+    for (int i = 0; i < MAX_PADS; i++) {
+        if (!pads[i].gc) continue;
+        const int k = pads[i].hd_kind;
+        if (k == HD_RUMBLE_PRO) ++*pro;
+        if (k == HD_RUMBLE_JOYCON_LEFT || k == HD_RUMBLE_JOYCON_PAIR) ++*left;
+        if (k == HD_RUMBLE_JOYCON_RIGHT || k == HD_RUMBLE_JOYCON_PAIR) ++*right;
+    }
+    ReleaseSRWLockShared(&state_lock);
+}
+/* (butterfly, host/joycon_pair.c) each Switch controller open sent HCI state 0, "disconnect and sleep" (subcommand
+   0x06): SDL's Switch driver writes a raw effect whose first byte is a subcommand as that subcommand
+   (HIDAPI_DriverSwitch_SendJoystickEffect). The controller drops the link, so no reply comes and SDL calls it failed
+   after its tries (about 100 ms each): what SDL says is not counted. Returns how many it went to */
+int hos_sdl_switch_power_off(void) {
+    void *gc[MAX_PADS];
+    int n = 0, sent = 0;
+    AcquireSRWLockShared(&state_lock);
+    for (int i = 0; i < MAX_PADS; i++)
+        if (pads[i].gc && pads[i].hd_kind != HD_RUMBLE_NONE) gc[n++] = pads[i].gc;
+    ReleaseSRWLockShared(&state_lock);
+    static const uint8_t sleep_now[2] = {0x06, 0x00};
+    for (int i = 0; i < n; i++) {
+        hos_sdl_pad_effect(gc[i], sleep_now, sizeof sleep_now);
+        sent++;
+    }
+    return sent;
+}
+
 /* (the Insert menu's Motion controls row) 0 no controller, 1 controllers with no gyroscope, 2 one with a gyroscope */
 int hos_sdl_gyro_status(void) { return (int)gyro_status; }
 /* The first open controller's name into out ("" with none) */
