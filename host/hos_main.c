@@ -1723,8 +1723,12 @@ static void game_switches(void) {
         }
 #ifdef _WIN32
         if (!getenv("RX_VK_KEEP_DRAWN_FINALIZED")) _putenv("RX_VK_KEEP_DRAWN_FINALIZED=1");   /* (the Rank Up screen's background) */
+        /* (a scene change's texture uploads at most 20 ms a frame, not 40: the rest come a few frames later. Before the high five
+           every frame took the whole 40 ms, 16-20 fps for some seconds) */
+        if (!getenv("RX_VK_UPLOAD_BUDGET_MS")) _putenv("RX_VK_UPLOAD_BUDGET_MS=20");
 #else
         setenv("RX_VK_KEEP_DRAWN_FINALIZED", "1", 0);
+        setenv("RX_VK_UPLOAD_BUDGET_MS", "20", 0);
 #endif
         hos_account_setup();   /* (the user a Lichii save belongs to, when HOS_ACCOUNT_UID names it) */
         fprintf(stderr, "[hos host] game switches: EDEN_NX2_GAME_PUSH_CONSTANTS=%s\n",

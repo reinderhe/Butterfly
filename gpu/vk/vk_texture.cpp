@@ -2485,7 +2485,13 @@ namespace {
 /// flickered, Discord 2026-11-09), 0: no deferral, as before
 bool upload_defer(const Texture& tex) {
     static const int64_t budget_ns = (int64_t)(getenv("RX_VK_UPLOAD_BUDGET_MS") ? atof(getenv("RX_VK_UPLOAD_BUDGET_MS")) : 40.0) * 1000000;
-    if (!budget_ns || !upload_defer_ok || tex.uploaded || !tex.astc || tex.gpu_written) return false;
+    // (butterfly) and the game's own BC textures (block-compressed in its files: materials' colour, normal and mask maps, as
+    // its ASTC ones are; never data a frame without would get wrong). Sports Resort loads hundreds of them at a scene change,
+    // 300-500 MB unswizzled on the CPU in one frame, not held by the budget: the frames before and during the high five at
+    // 16-20 fps. RX_VK_DEFER_BC=0: ASTC only, as before
+    static const bool defer_bc = !getenv("RX_VK_DEFER_BC") || atoi(getenv("RX_VK_DEFER_BC")) != 0;
+    const bool deferrable = tex.astc || (defer_bc && is_bc(tex.format) && !tex.bc);
+    if (!budget_ns || !upload_defer_ok || tex.uploaded || !deferrable || tex.gpu_written) return false;
     if (frame_upload_ns.load(std::memory_order_relaxed) < budget_ns) return false;
     st_deferred.fetch_add(1, std::memory_order_relaxed), st_deferred_frame.fetch_add(1, std::memory_order_relaxed);
     return true;
