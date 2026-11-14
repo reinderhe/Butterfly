@@ -1236,8 +1236,16 @@ HLE(_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19SixAxi
     RET(n);
 }
 HLE(_ZN2nn3hid25GetVibrationDeviceHandlesEPNS0_21VibrationDeviceHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {
+    /* (butterfly) device index 0 the left motor, 1 the right: a style of one Joy-Con has one device, its own (JoyLeft: 0,
+       JoyRight: 1), as hid answers. Asked for JoyRight alone, the handle said "left", and the left Joy-Con played the
+       right one's rumble */
+    const uint32_t style = (uint32_t)ARG(3);
+    const int right_only = (style & 0x10) && !(style & 0x0F);   /* (NpadStyleTag: 0 FullKey, 1 Handheld, 2 JoyDual, 3 JoyLeft, 4 JoyRight) */
+    const int left_only = (style & 0x08) && !(style & 0x17);
     int n = (int)ARG(1) < 2 ? (int)ARG(1) : 2;
-    for (int i = 0; i < n; i++) G32(ARG(0) + 4 * (uint64_t)i) = 3u | (G32(ARG(2)) & 0xFF) << 8 | (uint32_t)i << 16;
+    if (right_only || left_only) n = n > 1 ? 1 : n;
+    for (int i = 0; i < n; i++)
+        G32(ARG(0) + 4 * (uint64_t)i) = 3u | (G32(ARG(2)) & 0xFF) << 8 | (uint32_t)(right_only ? 1 : i) << 16;
     RET(n);
 }
 HLE(_ZN2nn3hid25InitializeVibrationDeviceERKNS0_21VibrationDeviceHandleE) {}

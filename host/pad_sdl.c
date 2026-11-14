@@ -171,7 +171,15 @@ static int hd_poll(int i, const uint8_t side[3][4], long long now) {
     if (pads[i].hd == HD_RUMBLE_OFF) return 0;
     uint8_t packet[HD_RUMBLE_PACKET_SIZE];
     const int single = pads[i].hd_kind == HD_RUMBLE_JOYCON_LEFT || pads[i].hd_kind == HD_RUMBLE_JOYCON_RIGHT;
-    hd_rumble_packet(pads[i].hd_kind, single ? side[2] : side[0], single ? side[2] : side[1], packet);
+    /* (butterfly) a single Joy-Con with its other half open too is one side of a pair: its own side's rumble only. Both merged,
+       the left Joy-Con lying on the desk rumbled with every table tennis hit the right one made. Alone, it has both sides' */
+    int partner = 0;
+    if (single) {
+        const int other = pads[i].hd_kind == HD_RUMBLE_JOYCON_LEFT ? HD_RUMBLE_JOYCON_RIGHT : HD_RUMBLE_JOYCON_LEFT;
+        for (int k = 0; k < MAX_PADS && !partner; k++) partner = k != i && pads[k].gc && pads[k].hd_kind == other;
+    }
+    const uint8_t *mine = !single ? NULL : !partner ? side[2] : pads[i].hd_kind == HD_RUMBLE_JOYCON_LEFT ? side[0] : side[1];
+    hd_rumble_packet(pads[i].hd_kind, single ? mine : side[0], single ? mine : side[1], packet);
     if (!hd_rumble_due(packet, pads[i].hd_sent, pads[i].hd_ever, now, pads[i].hd_ns)) return 1;
     const int was = pads[i].hd;
     pads[i].hd = (uint8_t)hd_rumble_after_send(hos_sdl_pad_effect(pads[i].gc, packet, sizeof packet));

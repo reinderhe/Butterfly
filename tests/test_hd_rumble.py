@@ -320,11 +320,19 @@ int main(void) {
         CHECK(!memcmp(side[2], side[0], 4));
         CHECK(hd_poll(4, side, t + 1000000000LL) == 1 && sent_n == 3 && !memcmp(sent_last + 2, side[0], 4) &&
               !memcmp(sent_last + 6, side[0], 4));
-        fake_type = 8;   /* (a left Joy-Con) */
+        fake_type = 8;   /* (a left Joy-Con, alone: the right one closed) */
+        pads[4].gc = NULL;
         hd_open(5, &dummy), pads[5].gc = &dummy;
         hd_rumble_encode(quiet, 100, side[0]), hd_rumble_encode(right, 100, side[1]);
         hd_rumble_merge(quiet, right, m), hd_rumble_encode(m, 100, side[2]);
         CHECK(hd_poll(5, side, t) == 1 && sent_n == 4 && !memcmp(sent_last + 2, side[1], 4) && !memcmp(sent_last + 6, side[1], 4));
+        /* (butterfly) both halves open, a pair: each plays its own side only (the left one on the desk stays still while the
+           right one hits the ball) */
+        pads[4].gc = &dummy;
+        CHECK(hd_poll(5, side, t + 2000000000LL) == 1 && sent_n == 5 && !memcmp(sent_last + 2, side[0], 4) &&
+              !memcmp(sent_last + 6, side[0], 4));
+        CHECK(hd_poll(4, side, t + 2000000000LL) == 1 && sent_n == 6 && !memcmp(sent_last + 2, side[1], 4) &&
+              !memcmp(sent_last + 6, side[1], 4));
     }
     return 0;
 }
